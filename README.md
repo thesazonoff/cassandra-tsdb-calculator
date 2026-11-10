@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img alt="Версия 2.0.1" src="https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-2.0.1-13A538">
+  <a href="https://github.com/thesazonoff/cassandra-tsdb-calculator/releases/latest"><img alt="Последний релиз" src="https://img.shields.io/github/v/release/thesazonoff/cassandra-tsdb-calculator?label=%D1%80%D0%B5%D0%BB%D0%B8%D0%B7&color=13A538"></a>
   <img alt="Apache Cassandra 5.0.9" src="https://img.shields.io/badge/Apache%20Cassandra-5.0.9-95C11F">
   <img alt="JDK 17" src="https://img.shields.io/badge/JDK-17-C8D400?labelColor=555">
   <img alt="Работает без интернета" src="https://img.shields.io/badge/%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%B0%D0%B5%D1%82-%D0%B1%D0%B5%D0%B7%20%D0%B8%D0%BD%D1%82%D0%B5%D1%80%D0%BD%D0%B5%D1%82%D0%B0-0A7429">
@@ -18,7 +18,7 @@
 
 ## Как пользоваться
 
-1. Скачайте [`index.html`](index.html) и откройте в любом браузере. Сервер и интернет не нужны.
+1. Скачайте файл калькулятора из [последнего релиза](https://github.com/thesazonoff/cassandra-tsdb-calculator/releases/latest) и откройте в любом браузере. Сервер и интернет не нужны.
 2. Слева введите сигналы MES, глубину хранения, допустимые отказы, число пользователей и тип дисков.
 3. Справа сразу появится результат. Выгрузите его в PDF, Excel или архив конфигов.
 
