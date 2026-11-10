@@ -8,6 +8,8 @@
   <img alt="JDK 17" src="https://img.shields.io/badge/JDK-17-C8D400?labelColor=555">
   <img alt="Работает без интернета" src="https://img.shields.io/badge/%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%B0%D0%B5%D1%82-%D0%B1%D0%B5%D0%B7%20%D0%B8%D0%BD%D1%82%D0%B5%D1%80%D0%BD%D0%B5%D1%82%D0%B0-0A7429">
   <img alt="Один HTML-файл" src="https://img.shields.io/badge/%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0-%D0%BD%D0%B5%20%D0%BD%D1%83%D0%B6%D0%BD%D0%B0-0B4F21">
+  <a href="https://github.com/thesazonoff/cassandra-tsdb-calculator/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/thesazonoff/cassandra-tsdb-calculator/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="Лицензия MIT" src="https://img.shields.io/badge/%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F-MIT-95C11F"></a>
 </p>
 
 Два калькулятора Apache Cassandra 5.0 для MES-системы, которая хранит временные ряды в таблице `"TSDB".data_points`. Специалист внедрения получает медианную конфигурацию кластера для старта проекта и проектной документации и проверяет, как кластер переживёт отказы.
@@ -159,3 +161,25 @@ flowchart LR
 ## Версии
 
 Расчёт ориентирован на Apache Cassandra 5.0.9 и JDK 17. История изменений: [CHANGELOG.md](CHANGELOG.md).
+
+## Разработка
+
+Исходники на JavaScript без фреймворков, сборка в один HTML-файл через esbuild. Расчёт (`src/core`) не зависит от браузера и проверяется в Node, интерфейс проверяется в Chromium через Playwright.
+
+```bash
+npm ci
+npm run build      # dist/index.html
+npm run check      # типы, unit-тесты, сборка, e2e, как в CI
+```
+
+| Документ | О чём |
+|---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Слои, поток данных, назначение каждого файла, типовые изменения |
+| [docs/adr/0001-stack.md](docs/adr/0001-stack.md) | Почему выбран такой стек |
+| [verification/README.md](verification/README.md) | Как модель объёма сверена с Apache Cassandra 5.0.9 и как повторить проверку |
+
+Релизы собираются из исходников workflow `Release` после всех проверок CI.
+
+## Лицензия
+
+[MIT](LICENSE).

@@ -1,0 +1,20 @@
+/* Шапка приложения: знак, версия, переключатель страниц, ссылка на GitHub. */
+.app-bar{display:flex;align-items:center;gap:12px 20px;flex-wrap:wrap;justify-content:space-between;padding:8px max(16px,env(safe-area-inset-left,0px)) 8px max(16px,env(safe-area-inset-right,0px));background:var(--brand-deep);color:#fff}
+.app-lead{display:flex;align-items:center;gap:10px;font-size:13px;color:#DDEBD8;white-space:nowrap}
+.app-mark{display:grid;grid-template-columns:repeat(3,5px);gap:2px;align-items:end;height:20px}
+.app-mark i{display:block;border-radius:1.5px}
+.app-mark i:nth-child(1){height:8px;background:var(--brand)}
+.app-mark i:nth-child(2){height:13px;background:var(--lime)}
+.app-mark i:nth-child(3){height:20px;background:var(--citron)}
+.app-ver{font-size:12px;font-weight:600;color:#273000;background:var(--lime);border-radius:999px;padding:2px 9px}
+.app-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.app-pages{display:flex;gap:4px;background:rgba(255,255,255,.1);border-radius:999px;padding:3px}
+.app-page{border:0;background:transparent;color:#E6F0E2;font-size:14px;font-weight:600;padding:7px 16px;border-radius:999px;cursor:pointer;white-space:nowrap;min-height:34px}
+.app-page:hover{background:rgba(255,255,255,.12);color:#fff}
+.app-page[aria-selected=true]{background:var(--citron);color:#273000}
+.app-page:focus-visible,.app-gh:focus-visible{outline:3px solid var(--citron);outline-offset:2px}
+.app-gh{display:inline-flex;align-items:center;gap:7px;color:#E6F0E2;text-decoration:none;font-size:13px;font-weight:600;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.22);min-height:34px}
+.app-gh:hover{background:rgba(255,255,255,.12);color:#fff}
+.app-gh svg{width:16px;height:16px;fill:currentColor}
+@media (max-width:560px){.app-title{display:none}.app-page{padding:7px 12px;font-size:13px}.app-gh span{display:none}}
+@media print{.app-bar{display:none}}

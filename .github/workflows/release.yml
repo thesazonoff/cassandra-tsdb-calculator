@@ -1,7 +1,7 @@
-# Публикация релиза: Actions → Release → Run workflow → версия, например 2.0.1.
-# Проверяет версию в index.html, ставит аннотированный тег vX.Y.Z, считает SHA-256
-# и публикует релиз с заметками из docs/releases/vX.Y.Z.md.
-# Версия с суффиксом (2.1.0-rc.1) публикуется как предварительная и не становится последней.
+# Публикация релиза: Actions → Release → Run workflow → версия, например 2.2.0 или 2.2.0-rc.1.
+# Сначала выполняются все проверки CI, затем файл собирается из исходников этого коммита,
+# ставится аннотированный тег vX.Y.Z и публикуется релиз с заметками docs/releases/vX.Y.Z.md.
+# Версия с суффиксом (-rc.N, -beta.N) публикуется как предварительная и не становится последней.
 # Запускать из ветки, где лежит эта версия (поле «Use workflow from»).
 name: Release
 
@@ -9,19 +9,50 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Версия без буквы v, например 2.0.1 или 2.1.0-rc.1"
+        description: "Версия без буквы v, например 2.2.0 или 2.2.0-rc.1"
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
+  validate:
+    name: Версия, CHANGELOG, заметки
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Проверить версию
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]; then
+            echo "::error::Версия должна быть в формате X.Y.Z или X.Y.Z-rc.N"; exit 1
+          fi
+          PKG=$(node -p "require('./package.json').version")
+          [ "$PKG" = "$VERSION" ] || { echo "::error::В package.json версия $PKG, ожидалась $VERSION"; exit 1; }
+          grep -qF "## [$VERSION]" CHANGELOG.md || { echo "::error::Нет раздела $VERSION в CHANGELOG.md"; exit 1; }
+          test -f "docs/releases/v$VERSION.md" || { echo "::error::Нет заметок docs/releases/v$VERSION.md"; exit 1; }
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Тег v$VERSION уже существует"; exit 1
+          fi
+
+  ci:
+    name: Проверки CI
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+
   release:
-    runs-on: ubuntu-latest
+    name: Сборка и публикация
+    needs: ci
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     env:
       VERSION: ${{ inputs.version }}
       GH_TOKEN: ${{ github.token }}
@@ -29,32 +60,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Проверить версию
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Собрать файл релиза
         run: |
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?(-(alpha|beta|rc)\.[0-9]+)?$ ]]; then
-            echo "::error::Версия должна быть в формате X.Y.Z или X.Y.Z-rc.N"; exit 1
-          fi
-          grep -q "APP_VERSION = '$VERSION'" index.html || { echo "::error::В index.html другая версия"; exit 1; }
-          grep -qF "## [$VERSION]" CHANGELOG.md || { echo "::error::Нет раздела $VERSION в CHANGELOG.md"; exit 1; }
-          test -f "docs/releases/v$VERSION.md" || { echo "::error::Нет заметок docs/releases/v$VERSION.md"; exit 1; }
-          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
-            echo "::error::Тег v$VERSION уже существует"; exit 1
-          fi
-
-      - name: Собрать файлы релиза
-        run: |
-          mkdir -p dist
-          cp index.html "dist/cassandra-tsdb-calculator-$VERSION.html"
-          cd dist && sha256sum "cassandra-tsdb-calculator-$VERSION.html" > SHA256SUMS.txt && cat SHA256SUMS.txt
-
+          FILE="cassandra-tsdb-calculator-$VERSION.html"
+          node scripts/build.mjs --out "dist/$FILE"
+          cd dist && sha256sum "$FILE" > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Поставить аннотированный тег
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "v$VERSION" -m "Калькулятор TSDB Cassandra $VERSION"
           git push origin "v$VERSION"
-
       - name: Опубликовать релиз
         run: |
           if [[ "$VERSION" == *-* ]]; then KIND="--prerelease --latest=false"; else KIND="--latest"; fi

@@ -1,0 +1,25 @@
+/* Сброс и глобальные правила: применяются ко всему документу. Компоненты страниц описаны в pages/<страница>/<страница>.css. */
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5;min-height:100dvh}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--brand);outline-offset:2px;border-radius:4px}
+[hidden]{display:none!important}
+img{max-width:100%}
+a{color:var(--brand-ink)}
+h1,h2,h3{margin:0;text-wrap:balance}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Уведомление: один элемент #toast на всё приложение */
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);opacity:0;background:var(--ink);color:#fff;padding:10px 16px;border-radius:var(--r-m);font-size:14px;z-index:100;transition:opacity .2s,transform .2s;pointer-events:none;max-width:calc(100% - 32px)}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* График вероятности (shared/prob.js) */
+.prob-chart text{fill:var(--muted)}
+
+@media print{
+  @page{size:A4;margin:12mm}
+  body{background:#fff}
+  .toast{display:none!important}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

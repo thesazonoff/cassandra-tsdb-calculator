@@ -1,0 +1,73 @@
+<!-- Разметка страницы «Отказоустойчивость». id с префиксом ft-; вставляется сборкой в src/index.html. -->
+<header class="top"><div class="top-in">
+  <div class="brand">
+    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="12" fill="none" stroke="#13A538" stroke-width="3" stroke-dasharray="12 3.7"/><circle cx="17" cy="5" r="3.2" fill="#95C11F"/><circle cx="27.4" cy="23" r="3.2" fill="#C8D400"/><circle cx="6.6" cy="23" r="3.2" fill="#13A538"/></svg>
+    <div><h1>Калькулятор отказоустойчивости Cassandra</h1><small>RF, consistency level, отказы нод, racks и DC</small></div>
+  </div>
+  <span class="badge">Apache Cassandra 5.0.x · сверено с 5.0.9</span>
+  <span class="spacer"></span>
+  <button class="btn" id="ft-btnShare" type="button">Скопировать ссылку на расчёт</button>
+  <button class="btn" id="ft-btnReset" type="button">Сбросить</button>
+</div></header>
+
+<div class="layout">
+  <aside class="inputs" id="ft-inputs">
+    <section class="panel">
+      <h2>Типовые схемы</h2>
+      <div class="presets" id="ft-presets"></div>
+    </section>
+    <section class="panel">
+      <h2>Топология <span class="hint">DC, racks, ноды, RF</span></h2>
+      <div id="ft-dcList"></div>
+      <button class="btn sm" id="ft-btnAddDc" type="button">+ Добавить DC</button>
+      <p class="note">RF задаётся для каждого DC отдельно (NetworkTopologyStrategy). Rack: группа нод с общей точкой отказа (стойка, питание, коммутатор, зона).</p>
+    </section>
+    <section class="panel">
+      <h2>Consistency level</h2>
+      <div class="field"><label for="ft-wcl">Запись</label><select id="ft-wcl"></select></div>
+      <div class="field"><label for="ft-rcl">Чтение</label><select id="ft-rcl"></select></div>
+      <div class="field" id="ft-clientRow"><label for="ft-clientDc">DC приложения (для LOCAL_*)</label><select id="ft-clientDc"></select></div>
+      <label class="check"><input type="checkbox" id="ft-lwt"> Используются LWT (IF NOT EXISTS, IF ...)</label>
+      <div class="field" id="ft-sclRow"><label for="ft-scl">Serial consistency</label><select id="ft-scl"></select></div>
+    </section>
+    <section class="panel">
+      <h2>Токены</h2>
+      <div class="field"><label for="ft-numTokens">num_tokens</label><select id="ft-numTokens"></select></div>
+      <div class="field"><label for="ft-tokenMode">Выдача токенов</label><select id="ft-tokenMode">
+        <option value="balanced">allocate_tokens (приближение)</option>
+        <option value="random">Случайная (без алгоритма)</option></select></div>
+      <div class="row"><button class="btn sm" id="ft-btnReseed" type="button">Другая раскладка токенов</button><span class="note" id="ft-seedNote"></span></div>
+    </section>
+    <section class="panel">
+      <h2>Данные и нагрузка <span class="hint">необязательно</span></h2>
+      <div class="field"><label for="ft-dataGB">Объём одной копии данных, ГБ</label><input type="number" min="0" step="any" id="ft-dataGB" placeholder="например 2000"></div>
+      <div class="field"><label for="ft-writesPs">Записей в секунду (клиент)</label><input type="number" min="0" step="any" id="ft-writesPs" placeholder="например 50000"></div>
+      <div class="field"><label for="ft-readsPs">Чтений в секунду (клиент)</label><input type="number" min="0" step="any" id="ft-readsPs" placeholder="например 2000"></div>
+      <div class="field"><label for="ft-rowBytes">Средний размер записи, байт</label><input type="number" min="0" step="any" id="ft-rowBytes" placeholder="например 120"></div>
+    </section>
+    <section class="panel">
+      <h2>Имена для конфигурации</h2>
+      <div class="field"><label for="ft-ks">Keyspace</label><input type="text" id="ft-ks"></div>
+      <div class="field"><label for="ft-cluster">cluster_name</label><input type="text" id="ft-cluster"></div>
+    </section>
+  </aside>
+
+  <main class="results" id="ft-main">
+    <div id="ft-errBox"></div>
+    <nav class="tabs" role="tablist" id="ft-tabs">
+      <button class="tab" role="tab" data-tab="sum" aria-selected="true">Итог</button>
+      <button class="tab" role="tab" data-tab="fail" aria-selected="false">Отказы</button>
+      <button class="tab" role="tab" data-tab="scheme" aria-selected="false">Схема отказов</button>
+      <button class="tab" role="tab" data-tab="data" aria-selected="false">Данные и нагрузка</button>
+      <button class="tab" role="tab" data-tab="cfg" aria-selected="false">Конфигурация</button>
+      <button class="tab" role="tab" data-tab="method" aria-selected="false">Методика</button>
+    </nav>
+    <section class="pane on" id="ft-pane-sum"></section>
+    <section class="pane" id="ft-pane-fail"></section>
+    <section class="pane" id="ft-pane-scheme"></section>
+    <section class="pane" id="ft-pane-data"></section>
+    <section class="pane" id="ft-pane-cfg"></section>
+    <section class="pane" id="ft-pane-method"></section>
+  </main>
+</div>
+<div class="foot">Аналог <a href="https://github.com/jalkanen/cassandracalculator" target="_blank" rel="noopener">jalkanen/cassandracalculator</a>, переработанный под Apache Cassandra 5.0: NetworkTopologyStrategy, racks, несколько DC, vnodes. Размещение реплик повторяет код NetworkTopologyStrategy 5.0.9.</div>
