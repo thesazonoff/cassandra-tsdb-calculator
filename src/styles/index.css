@@ -1,0 +1,6 @@
+/* Порядок подключения стилей. Сборка (scripts/build.mjs) склеивает их, раскрывает вложенность и минимизирует. */
+@import './tokens.css';
+@import './base.css';
+@import './shell.css';
+@import '../pages/calc/calc.css';
+@import '../pages/fault/fault.css';

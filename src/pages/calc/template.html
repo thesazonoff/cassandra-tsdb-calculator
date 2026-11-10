@@ -1,0 +1,253 @@
+<!-- Разметка страницы «Системные требования». Вставляется сборкой в src/index.html. -->
+<header class="top">
+  <div class="brand">
+    <div class="mark" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div>
+      <h1>Калькулятор TSDB Cassandra<span class="ver" data-app-version></span></h1>
+      <p>Apache Cassandra <span id="cv">5.0.9</span> · JDK 17 · <code>"TSDB".data_points</code> для MES</p>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn" type="button" id="ex-pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="6" y="14" width="12" height="7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/></svg>Отчёт PDF</button>
+    <button class="btn" type="button" id="ex-xlsx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>Excel</button>
+    <button class="btn" type="button" id="ex-zip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>Конфиги .zip</button>
+    <details class="menu" id="menu">
+      <summary class="btn" aria-label="Другие действия">Ещё<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="menu-pop">
+        <button type="button" id="m-save">Добавить расчёт в сравнение</button>
+        <button type="button" id="m-link">Скопировать ссылку на расчёт</button>
+        <hr>
+        <button type="button" id="m-json">Сохранить сценарий .json</button>
+        <label for="im-json">Загрузить сценарий .json</label>
+        <hr>
+        <button type="button" id="m-new">Что нового</button>
+        <button type="button" id="m-reset">Сбросить все значения</button>
+      </div>
+    </details>
+    <input type="file" id="im-json" accept=".json,application/json" class="sr">
+  </div>
+</header>
+
+<main class="app" id="calc-main">
+  <section class="inputs" aria-label="Исходные данные">
+
+    <section class="card"><div class="sect-body" style="padding-top:16px">
+      <div class="fld"><span class="lbl" id="lbl-mode">Развёртывание</span>
+        <div class="seg wide" role="radiogroup" aria-labelledby="lbl-mode">
+          <label><input type="radio" name="mode" value="standalone" data-k="mode"><span>Одна нода</span></label>
+          <label><input type="radio" name="mode" value="cluster" data-k="mode"><span>Кластер</span></label>
+        </div></div>
+      <div class="fld"><span class="lbl" id="lbl-hw">Оборудование</span>
+        <div class="seg wide" role="radiogroup" aria-labelledby="lbl-hw">
+          <label><input type="radio" name="hw" value="recommend" data-k="hw"><span>Подобрать</span></label>
+          <label><input type="radio" name="hw" value="own" data-k="hw"><span>Проверить своё</span></label>
+        </div></div>
+      <div class="grid g3" data-show="hw=own">
+        <div class="fld"><label for="f-ownCores">Ядер CPU</label><input type="number" id="f-ownCores" data-k="ownCores" min="2" step="1"></div>
+        <div class="fld"><label for="f-ownRam">RAM, ГБ</label><input type="number" id="f-ownRam" data-k="ownRam" min="8" step="8"></div>
+        <div class="fld"><label for="f-ownDrives">Data-дисков</label><input type="number" id="f-ownDrives" data-k="ownDrives" min="1" step="1"></div>
+        <div class="fld"><label for="f-ownDrive">Объём диска, ТБ</label><input type="number" id="f-ownDrive" data-k="ownDrive" min="0.1" step="0.01"></div>
+      </div>
+    </div></section>
+
+    <details class="sect card" open>
+      <summary><h2>Сигналы MES</h2><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="sect-body">
+        <table class="groups" aria-label="Группы тегов">
+          <thead><tr><th class="w-type">Тип</th><th class="w-n">Тегов</th><th class="w-p">Период, с</th><th class="r">Точек/с</th><th class="w-x"><span class="sr">Удалить</span></th></tr></thead>
+          <tbody id="groups"></tbody>
+        </table>
+        <div class="row-actions">
+          <button class="btn" type="button" id="add-group"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Добавить группу</button>
+          <div class="fld" style="flex:1 1 170px;max-width:230px"><label for="preset" class="sr">Пример нагрузки</label>
+            <select id="preset"><option value="">Загрузить пример…</option></select></div>
+        </div>
+        <div class="totals" id="totals" aria-live="polite"></div>
+        <div class="grid g3">
+          <div class="fld"><label for="f-strLen">Длина STRING</label><input type="number" id="f-strLen" data-k="strLen" min="0" step="1"></div>
+          <div class="fld"><label for="f-annPct">Аннотации, %</label><input type="number" id="f-annPct" data-k="annPct" min="0" max="100" step="0.1"></div>
+          <div class="fld"><label for="f-annLen">Длина аннотации</label><input type="number" id="f-annLen" data-k="annLen" min="0" step="1"></div>
+        </div>
+        <details class="more"><summary>Дополнительно</summary><div class="more-body">
+          <div class="grid g3">
+            <div class="fld"><label for="f-strEnc">Текст STRING</label><select id="f-strEnc" data-k="strEnc"><option value="lat">Латиница</option><option value="mix">Смешанный</option><option value="cyr">Кириллица</option></select></div>
+            <div class="fld"><label for="f-annEnc">Текст аннотаций</label><select id="f-annEnc" data-k="annEnc"><option value="lat">Латиница</option><option value="mix">Смешанный</option><option value="cyr">Кириллица</option></select></div>
+            <div class="fld"><label for="f-peak">Пик потока, ×</label><input type="number" id="f-peak" data-k="peak" min="1" step="0.5"></div>
+          </div>
+          <p class="hint">Пик: во сколько раз поток кратко растёт, когда после обрыва связи сервер сбора досылает накопленный буфер.</p>
+          <div class="fld"><label for="f-partMs">PartitionSize, мс</label><input type="number" id="f-partMs" data-k="partMs" min="1" step="1000000"><p class="hint" id="partHint"></p></div>
+          <label class="check"><input type="checkbox" data-k="snapPer" id="f-snapPer"><span>Таблица snapshots обновляется на каждую точку<small>Текущее значение тега пишется вместе с точкой: поток записи удваивается.</small></span></label>
+        </div></details>
+      </div>
+    </details>
+
+    <details class="sect card" open>
+      <summary><h2>Хранение</h2><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="sect-body">
+        <div class="grid g3">
+          <div class="fld"><label for="f-retention">Глубина, сут</label><input type="number" id="f-retention" data-k="retention" min="1" step="1"></div>
+          <div class="fld"><label for="f-growth">Рост тегов, %/год</label><input type="number" id="f-growth" data-k="growth" min="0" step="1"></div>
+          <div class="fld"><label for="f-years">Горизонт, лет</label><input type="number" id="f-years" data-k="years" min="0" max="15" step="1"></div>
+        </div>
+        <div class="fld"><span class="lbl" id="lbl-comp">Сжатие data_points</span>
+          <div class="seg wide" role="radiogroup" aria-labelledby="lbl-comp">
+            <label><input type="radio" name="comp" value="lz4" data-k="comp"><span>LZ4</span></label>
+            <label><input type="radio" name="comp" value="none" data-k="comp"><span>Без сжатия</span></label>
+          </div>
+          <p class="hint" id="compHint"></p></div>
+        <details class="more"><summary>Как сейчас удаляются данные</summary><div class="more-body">
+          <div class="grid">
+            <div class="fld"><label for="f-cleanup">Удаление старых данных</label><select id="f-cleanup" data-k="cleanup"><option value="delete">DELETE партиций по расписанию</option><option value="delete_gc">DELETE + nodetool garbagecollect</option><option value="truncate">TRUNCATE таблицы</option></select></div>
+            <div class="fld" data-show="cleanup=delete_gc|truncate"><label for="f-cleanInt">Интервал очистки, сут</label><input type="number" id="f-cleanInt" data-k="cleanInt" min="1" step="1"></div>
+            <div class="fld"><label for="f-backups">incremental_backups</label><select id="f-backups" data-k="backups"><option value="on_nocleanup">Включено, не чистится</option><option value="on_cleanup">Включено, выгрузка и очистка</option><option value="off">Выключено</option></select></div>
+            <div class="fld" data-show="backups=on_cleanup"><label for="f-backInt">Очистка backups/, сут</label><input type="number" id="f-backInt" data-k="backInt" min="1" step="1"></div>
+          </div>
+          <p class="hint">Влияет только на вариант «Текущая схема». В рекомендациях удаление по TTL таблицы.</p>
+        </div></details>
+      </div>
+    </details>
+
+    <details class="sect card" open>
+      <summary><h2>Отказоустойчивость</h2><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="sect-body">
+        <p class="hint" data-show="mode=standalone">Одна нода хранит одну копию данных. Отказ сервера останавливает работу MES до восстановления.</p>
+        <div data-show="mode=cluster" class="sect-body" style="padding:0">
+          <div class="grid g3">
+            <div class="fld"><label for="f-dc">Дата-центров</label><input type="number" id="f-dc" data-k="dc" min="1" max="5" step="1"></div>
+            <div class="fld"><label for="f-F">Может отказать нод</label><input type="number" id="f-F" data-k="F" min="0" max="3" step="1"></div>
+          </div>
+          <div class="fld"><span class="lbl" id="lbl-cons">Тренды и отчёты</span>
+            <div class="seg wide" role="radiogroup" aria-labelledby="lbl-cons">
+              <label><input type="radio" name="cons" value="strong" data-k="cons"><span>Всегда свежие</span></label>
+              <label><input type="radio" name="cons" value="eventual" data-k="cons"><span>Допустима задержка</span></label>
+            </div></div>
+          <div id="repBox" class="rep-box" aria-live="polite"></div>
+          <details class="more" id="more-rep"><summary>RF, consistency level, racks</summary><div class="more-body">
+            <label class="check"><input type="checkbox" data-k="manual" id="f-manual"><span>Задать RF и consistency level вручную</span></label>
+            <div data-show="manual=true" class="more-body" style="padding:0">
+              <div class="grid g3" id="rfGrid"></div>
+              <div class="grid g3">
+                <div class="fld"><label for="f-wcl">Запись</label><select id="f-wcl" data-k="wcl"></select></div>
+                <div class="fld"><label for="f-rcl">Чтение</label><select id="f-rcl" data-k="rcl"></select></div>
+              </div>
+              <label class="check"><input type="checkbox" data-k="lwt" id="f-lwt"><span>MES использует LWT (IF NOT EXISTS)</span></label>
+              <div class="fld" data-show="lwt=true"><label for="f-scl">Serial consistency</label><select id="f-scl" data-k="scl"><option>LOCAL_SERIAL</option><option>SERIAL</option></select></div>
+            </div>
+            <div class="grid">
+              <div class="fld"><label for="f-rackPolicy">Racks</label><select id="f-rackPolicy" data-k="rackPolicy"><option value="rf">По стойке на реплику (racks = RF)</option><option value="one">Один rack</option></select></div>
+              <div class="fld"><label for="f-numTokens">num_tokens</label><select id="f-numTokens" data-k="numTokens"><option value="1">1</option><option value="4">4</option><option value="8">8</option><option value="16">16 (по умолчанию)</option><option value="32">32</option></select></div>
+            </div>
+          </div></details>
+        </div>
+      </div>
+    </details>
+
+    <details class="sect card" open>
+      <summary><h2>Пользователи</h2><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="sect-body">
+        <div class="grid">
+          <div class="fld"><label for="f-users">Работают одновременно</label><input type="number" id="f-users" data-k="users" min="0" step="1"></div>
+          <div class="fld"><label for="f-usage">Профиль работы</label><select id="f-usage" data-k="usage"><option value="light">Редкие обращения</option><option value="typical">Типовой</option><option value="heavy">Активная аналитика</option><option value="custom">Свой</option></select></div>
+        </div>
+        <p class="hint" id="usageHint"></p>
+        <div data-show="usage=custom" class="more-body" style="padding:0">
+          <p class="sub">На одного пользователя</p>
+          <div class="grid g3">
+            <div class="fld"><label for="f-trOpen">Трендов в час</label><input type="number" id="f-trOpen" data-k="trOpen" min="0" step="1"></div>
+            <div class="fld"><label for="f-trTags">Тегов на тренде</label><input type="number" id="f-trTags" data-k="trTags" min="0" step="1"></div>
+            <div class="fld"><label for="f-trWin">Окно тренда, ч</label><input type="number" id="f-trWin" data-k="trWin" min="0.1" step="1"></div>
+            <div class="fld"><label for="f-trRef">Обновление тренда, с</label><input type="number" id="f-trRef" data-k="trRef" min="1" step="1"></div>
+            <div class="fld"><label for="f-mnTags">Тегов на мнемосхеме</label><input type="number" id="f-mnTags" data-k="mnTags" min="0" step="1"></div>
+            <div class="fld"><label for="f-mnRef">Обновление мнемосхемы, с</label><input type="number" id="f-mnRef" data-k="mnRef" min="0.5" step="0.5"></div>
+            <div class="fld"><label for="f-repH">Отчётов в час</label><input type="number" id="f-repH" data-k="repH" min="0" step="0.5"></div>
+            <div class="fld"><label for="f-repTags">Тегов в отчёте</label><input type="number" id="f-repTags" data-k="repTags" min="0" step="1"></div>
+            <div class="fld"><label for="f-repDays">Период отчёта, сут</label><input type="number" id="f-repDays" data-k="repDays" min="0.01" step="1"></div>
+          </div>
+        </div>
+        <details class="more"><summary>Требования к задержкам и восстановлению</summary><div class="more-body">
+          <div class="grid">
+            <div class="fld"><label for="f-slaW">p99 записи, мс</label><input type="number" id="f-slaW" data-k="slaW" min="0" step="1"></div>
+            <div class="fld"><label for="f-slaR">p99 чтения, мс</label><input type="number" id="f-slaR" data-k="slaR" min="0" step="1"></div>
+            <div class="fld"><label for="f-rpo">Потеря данных (RPO), с</label><input type="number" id="f-rpo" data-k="rpo" min="0" step="1"></div>
+            <div class="fld" data-show="mode=cluster"><label for="f-rto">Замена ноды (RTO), ч</label><input type="number" id="f-rto" data-k="rto" min="0" step="0.5"></div>
+          </div>
+          <p class="hint">0 — требование не задано.</p>
+        </div></details>
+      </div>
+    </details>
+
+    <details class="sect card" open>
+      <summary><h2>Инфраструктура</h2><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="sect-body">
+        <div class="fld"><span class="lbl" id="lbl-disk">Накопители</span>
+          <div class="seg wide" role="radiogroup" aria-labelledby="lbl-disk">
+            <label><input type="radio" name="disk" value="nvme" data-k="disk"><span>NVMe</span></label>
+            <label><input type="radio" name="disk" value="ssd" data-k="disk"><span>SATA SSD</span></label>
+            <label><input type="radio" name="disk" value="hdd" data-k="disk"><span>HDD</span></label>
+          </div></div>
+        <div class="fld"><label for="f-raid">RAID data-диска</label><select id="f-raid" data-k="raid"><option value="none">Без RAID, один диск</option><option value="raid0">RAID 0</option><option value="jbod">JBOD</option><option value="raid1">RAID 1</option><option value="raid10">RAID 10</option><option value="raid5">RAID 5</option><option value="raid6">RAID 6</option></select></div>
+        <details class="more"><summary>Диски и сеть подробнее</summary><div class="more-body">
+          <div class="grid">
+            <div class="fld" data-show="hw=recommend"><label for="f-drive">Объём накопителя</label><select id="f-drive" data-k="drive"></select></div>
+            <div class="fld"><label for="f-maxNodeTB">Данных на ноду, не больше, ТБ</label><input type="number" id="f-maxNodeTB" data-k="maxNodeTB" min="0.5" step="0.5"></div>
+            <div class="fld" data-show="mode=cluster"><label for="f-netIn">Сеть между нодами, Гбит/с</label><input type="number" id="f-netIn" data-k="netIn" min="0.1" step="1"></div>
+            <div class="fld" data-show="mode=cluster"><label for="f-rttIn">Задержка между нодами, мс</label><input type="number" id="f-rttIn" data-k="rttIn" min="0" step="0.1"></div>
+            <div class="fld" data-show="dcmulti"><label for="f-netDc">Канал между ДЦ, Гбит/с</label><input type="number" id="f-netDc" data-k="netDc" min="0.01" step="0.1"></div>
+            <div class="fld" data-show="dcmulti"><label for="f-rttDc">Задержка между ДЦ, мс</label><input type="number" id="f-rttDc" data-k="rttDc" min="0" step="1"></div>
+          </div>
+        </div></details>
+      </div>
+    </details>
+  </section>
+
+  <section class="results card" aria-label="Результаты расчёта">
+    <div class="res-head">
+      <div class="res-bar">
+        <div class="seg" role="radiogroup" aria-label="Вариант схемы">
+          <label><input type="radio" name="variant" value="cur" id="var-cur"><span>Текущая схема</span></label>
+          <label><input type="radio" name="variant" value="rec" id="var-rec"><span>Рекомендации</span></label>
+          <label><input type="radio" name="variant" value="unset" id="var-unset"><span>+ доработка драйвера</span></label>
+        </div>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Разделы результата">
+        <button class="tab" role="tab" id="tab-sum" aria-controls="pane-sum" aria-selected="true">Итог</button>
+        <button class="tab" role="tab" id="tab-disk" aria-controls="pane-disk" aria-selected="false">Диски</button>
+        <button class="tab" role="tab" id="tab-ft" aria-controls="pane-ft" aria-selected="false">Отказоустойчивость</button>
+        <button class="tab" role="tab" id="tab-cfg" aria-controls="pane-cfg" aria-selected="false">Конфигурация</button>
+        <button class="tab" role="tab" id="tab-cal" aria-controls="pane-cal" aria-selected="false">Калибровка <span id="cal-badge"></span></button>
+        <button class="tab" role="tab" id="tab-met" aria-controls="pane-met" aria-selected="false">Методика</button>
+        <button class="tab" role="tab" id="tab-cmp" aria-controls="pane-cmp" aria-selected="false" hidden>Сравнение <span id="cmp-badge"></span></button>
+      </div>
+    </div>
+    <div class="pane" role="tabpanel" id="pane-sum" aria-labelledby="tab-sum"></div>
+    <div class="pane" role="tabpanel" id="pane-disk" aria-labelledby="tab-disk" hidden></div>
+    <div class="pane" role="tabpanel" id="pane-ft" aria-labelledby="tab-ft" hidden></div>
+    <div class="pane" role="tabpanel" id="pane-cfg" aria-labelledby="tab-cfg" hidden></div>
+    <div class="pane" role="tabpanel" id="pane-cal" aria-labelledby="tab-cal" hidden></div>
+    <div class="pane" role="tabpanel" id="pane-met" aria-labelledby="tab-met" hidden></div>
+    <div class="pane" role="tabpanel" id="pane-cmp" aria-labelledby="tab-cmp" hidden></div>
+    <div class="print-only" id="print"></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <span>Медианная оценка для старта внедрения и проектной документации. Объём сверен с Apache Cassandra 5.0.9 на типовом профиле значений; на действующей инсталляции уточняется во вкладке «Калибровка».</span>
+  <span>Версия <span data-app-version></span> · <button type="button" class="linkbtn" id="f-new">Что нового</button></span>
+</footer>
+<dialog id="dlg-new" aria-labelledby="dlg-new-h"><div class="dlg">
+  <h2 id="dlg-new-h" style="font-size:18px">Что нового</h2>
+  <ul>
+    <li>Объём на диске считается по точному формату строк SSTable Cassandra 5.0.9 с учётом сжатия LZ4 16 КиБ. Модель сверена с официальным дистрибутивом 5.0.9: побайтно с SSTable, записанными кодом Cassandra, и с точностью 0,12 % на запущенном сервере.</li>
+    <li>Сравнение LZ4 и хранения без сжатия.</li>
+    <li>Калибровка по выводу <code>nodetool tablestats</code> с действующей инсталляции.</li>
+    <li>Встроен калькулятор отказоустойчивости: racks, несколько ДЦ, размещение реплик как в NetworkTopologyStrategy, интерактивная схема отказов, вероятность при случайных отказах.</li>
+    <li>Третий вариант схемы: доработка драйвера C# (Unset.Value вместо null).</li>
+    <li>Конфигурация драйвера C#, cassandra-rackdc.properties на каждую ноду.</li>
+    <li>Работает без интернета: Excel, ZIP и отчёт PDF формируются внутри страницы.</li>
+    <li>Меньше полей: профиль пользователей одним выбором, параметры для архитектора спрятаны в «Дополнительно».</li>
+    <li>2.2: обе страницы работают в одном приложении без вложенных фреймов, движок отказоустойчивости общий. Исходный код, тесты и проверка модели на Cassandra 5.0.9 открыты на GitHub под лицензией MIT.</li>
+    <li>2.1: вторая страница «Отказоустойчивость» с полной схемой отказов, матрицей консистентности между ДЦ и конфигурацией keyspace.</li>
+    <li>2.0.1: по итогам проверки на сервере 5.0.9 уточнён вариант с Unset.Value (маска колонок 2 байта), заголовок партиции формата nb, в cassandra.yaml добавлены storage_compatibility_mode: NONE и формат BTI.</li>
+  </ul>
+  <div class="dlg-f"><button class="btn primary" type="button" id="dlg-new-close">Понятно</button></div>
+</div></dialog>
