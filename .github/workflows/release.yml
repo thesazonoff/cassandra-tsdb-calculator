@@ -60,6 +60,7 @@ jobs:
           if [[ "$VERSION" == *-* ]]; then KIND="--prerelease --latest=false"; else KIND="--latest"; fi
           gh release create "v$VERSION" \
             --verify-tag \
+            --target "$GITHUB_REF_NAME" \
             --title "Калькулятор TSDB Cassandra $VERSION" \
             --notes-file "docs/releases/v$VERSION.md" \
             $KIND \
