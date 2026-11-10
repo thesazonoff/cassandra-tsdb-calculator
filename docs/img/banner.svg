@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="260" viewBox="0 0 1200 260" role="img" aria-label="Калькулятор TSDB Cassandra">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B4F21"/>
+      <stop offset="0.6" stop-color="#0A7429"/>
+      <stop offset="1" stop-color="#13A538"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#C8D400" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#C8D400" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="260" rx="18" fill="url(#bg)"/>
+  <circle cx="1080" cy="40" r="210" fill="url(#glow)"/>
+  <g transform="translate(64 78)">
+    <rect x="0" y="62" width="22" height="42" rx="5" fill="#13A538" stroke="#ffffff" stroke-opacity="0.35"/>
+    <rect x="32" y="34" width="22" height="70" rx="5" fill="#95C11F"/>
+    <rect x="64" y="0" width="22" height="104" rx="5" fill="#C8D400"/>
+  </g>
+  <text x="190" y="128" fill="#ffffff" font-family="'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="48" font-weight="700">Калькулятор TSDB Cassandra</text>
+  <text x="192" y="172" fill="#E6F4EA" font-family="'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="22">Сайзинг Apache Cassandra 5.0 для временных рядов MES</text>
+  <g font-family="'Segoe UI', Roboto, Arial, sans-serif" font-size="15" font-weight="600">
+    <rect x="192" y="196" width="140" height="30" rx="15" fill="#C8D400"/><text x="262" y="216" text-anchor="middle" fill="#273000">ноды и железо</text>
+    <rect x="342" y="196" width="180" height="30" rx="15" fill="#ffffff" fill-opacity="0.16" stroke="#ffffff" stroke-opacity="0.3"/><text x="432" y="216" text-anchor="middle" fill="#ffffff">диски с учётом LZ4</text>
+    <rect x="532" y="196" width="180" height="30" rx="15" fill="#ffffff" fill-opacity="0.16" stroke="#ffffff" stroke-opacity="0.3"/><text x="622" y="216" text-anchor="middle" fill="#ffffff">отказоустойчивость</text>
+    <rect x="722" y="196" width="160" height="30" rx="15" fill="#ffffff" fill-opacity="0.16" stroke="#ffffff" stroke-opacity="0.3"/><text x="802" y="216" text-anchor="middle" fill="#ffffff">готовые конфиги</text>
+  </g>
+</svg>

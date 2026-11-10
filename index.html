@@ -1,0 +1,2665 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Калькулятор TSDB Cassandra 2.0</title>
+<meta name="description" content="Расчёт кластера Apache Cassandra 5.0 для временных рядов MES: ноды, отказоустойчивость, диски с учётом сжатия LZ4, конфигурация">
+<style>
+
+/* Раскладка: шапка с режимами, слева ввод (фиксированная колонка), справа результаты со вкладками; на узком экране одна колонка. */
+:root{
+  --brand:#13A538; --brand-ink:#0A7429; --brand-deep:#0B4F21; --lime:#95C11F; --citron:#C8D400;
+  --bg:#F3F6EF; --surface:#FFFFFF; --surface-2:#EDF2E8; --surface-3:#E3EBDC;
+  --ink:#15201A; --muted:#55645A; --faint:#7B8A7F; --line:#D8E1D1; --line-strong:#B8C6AF;
+  --crit:#B42318; --crit-bg:#FDEDEB; --warn:#8A5300; --warn-bg:#FFF3D6; --ok:#0A7429; --ok-bg:#E6F4EA; --info:#245A87; --info-bg:#E8F0F8;
+  --seg-live:#13A538; --seg-head:#95C11F; --seg-repair:#C8D400; --seg-snap:#6E8F5E; --seg-hints:#245A87; --seg-back:#B42318; --seg-auto:#E07A1F; --seg-fs:#B8C6AF;
+  --f-display:'Segoe UI Variable Display','Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --f-body:'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --f-mono:'Cascadia Mono',Consolas,'Liberation Mono',monospace;
+  --r-s:6px; --r-m:10px; --r-l:14px;
+  --shadow:0 1px 2px rgba(21,32,26,.06),0 4px 16px rgba(21,32,26,.05);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 32px}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--brand);outline-offset:2px;border-radius:4px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+h1,h2,h3{margin:0;text-wrap:balance}
+code,.mono{font-family:var(--f-mono);font-size:.92em}
+.num{font-variant-numeric:tabular-nums}
+
+/* Шапка */
+.top{max-width:1560px;margin:0 auto;display:flex;flex-wrap:wrap;gap:16px 24px;align-items:center;justify-content:space-between;padding-block:18px 14px;border-bottom:1px solid var(--line)}
+.brand{display:flex;gap:14px;align-items:center;min-width:0}
+.mark{display:grid;grid-template-columns:repeat(3,7px);gap:3px;align-items:end;height:30px;flex:none}
+.mark i{display:block;border-radius:2px}
+.mark i:nth-child(1){height:12px;background:var(--brand)}
+.mark i:nth-child(2){height:20px;background:var(--lime)}
+.mark i:nth-child(3){height:30px;background:var(--citron)}
+.brand h1{font-family:var(--f-display);font-weight:600;font-size:clamp(17px,2.2vw,22px);letter-spacing:-.01em}
+.brand p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.modes{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.mode-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+
+/* Сегментированные переключатели */
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg label{position:relative;cursor:pointer}
+.seg input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.seg span{display:block;padding:6px 14px;border-radius:999px;font-size:14px;font-weight:500;color:var(--muted);white-space:nowrap;transition:background .15s,color .15s}
+.seg input:checked+span{background:var(--surface);color:var(--brand-deep);box-shadow:0 1px 3px rgba(21,32,26,.15);font-weight:600}
+.seg input:focus-visible+span{outline:3px solid var(--brand);outline-offset:1px}
+.seg label:hover span{color:var(--ink)}
+
+/* Сетка приложения */
+.app{max-width:1560px;margin:18px auto 0;display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start}
+@media (min-width:1100px){
+  .app{grid-template-columns:minmax(380px,470px) minmax(0,1fr)}
+  .results{position:sticky;top:12px;max-height:calc(100dvh - 24px);overflow:auto;overscroll-behavior:contain}
+}
+
+/* Панель ввода */
+.inputs{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l);box-shadow:var(--shadow)}
+details.sect>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;min-height:52px}
+details.sect>summary::-webkit-details-marker{display:none}
+details.sect>summary h2{font-size:16px;font-weight:600;display:flex;align-items:baseline;gap:10px}
+details.sect>summary h2 small{font-weight:400;color:var(--muted);font-size:13px}
+details.sect>summary .chev{flex:none;width:20px;height:20px;transition:transform .2s;color:var(--muted)}
+details.sect[open]>summary .chev{transform:rotate(180deg)}
+.sect-body{padding:2px 18px 18px;display:flex;flex-direction:column;gap:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px 14px}
+.grid.g3{grid-template-columns:repeat(auto-fill,minmax(118px,1fr))}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fld>label,.fld .lbl{font-size:13px;font-weight:500;color:var(--ink)}
+.fld input[type=number],.fld input[type=text],.fld select{height:40px;border:1px solid var(--line-strong);border-radius:var(--r-s);background:var(--surface);padding:0 10px;width:100%;min-width:0}
+.fld input[type=number]{font-variant-numeric:tabular-nums}
+.fld input:hover,.fld select:hover{border-color:var(--faint)}
+.fld input:focus,.fld select:focus{border-color:var(--brand);outline:none;box-shadow:0 0 0 3px rgba(19,165,56,.2)}
+.hint{margin:0;font-size:12.5px;line-height:1.45;color:var(--muted)}
+.sub{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin:4px 0 -4px}
+.check{display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:14px}
+.check input{width:18px;height:18px;margin:2px 0 0;accent-color:var(--brand-ink);flex:none}
+.check small{display:block;color:var(--muted);font-size:12.5px}
+.inline-note{background:var(--surface-2);border-radius:var(--r-s);padding:10px 12px;font-size:13px;color:var(--muted)}
+
+/* Группы тегов */
+.groups{width:100%;border-collapse:separate;border-spacing:0 6px;margin-top:-6px}
+.groups th{white-space:nowrap;font-size:12px;font-weight:600;color:var(--muted);text-align:left;padding:0 4px;text-transform:uppercase;letter-spacing:.05em}
+.groups td{padding:0 4px;vertical-align:middle}
+.groups select,.groups input{height:38px;border:1px solid var(--line-strong);border-radius:var(--r-s);background:var(--surface);padding:0 6px;width:100%;min-width:0}
+.groups input{font-variant-numeric:tabular-nums}
+.groups td.pps{font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted);text-align:right;white-space:nowrap}
+.groups .w-type{width:32%}.groups .w-n{width:24%}.groups .w-p{width:20%}.groups .w-x{width:40px}
+.icon-btn{width:36px;height:36px;display:inline-grid;place-items:center;border:1px solid transparent;background:transparent;border-radius:var(--r-s);cursor:pointer;color:var(--muted)}
+.icon-btn:hover{background:var(--crit-bg);color:var(--crit)}
+.icon-btn svg{width:18px;height:18px}
+.row-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.totals{font-size:13.5px;background:var(--surface-2);border-radius:var(--r-s);padding:10px 12px;display:flex;flex-wrap:wrap;gap:4px 18px}
+.totals b{font-variant-numeric:tabular-nums}
+
+/* Кнопки */
+.btn{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 14px;border-radius:var(--r-s);border:1px solid var(--line-strong);background:var(--surface);cursor:pointer;font-size:14px;font-weight:500;transition:background .15s,border-color .15s,transform .1s;white-space:nowrap}
+.btn:hover{background:var(--surface-2);border-color:var(--faint)}
+.btn:active{transform:scale(.98)}
+.btn svg{width:17px;height:17px;flex:none}
+.btn.primary{background:var(--brand-ink);border-color:var(--brand-ink);color:#fff}
+.btn.primary:hover{background:var(--brand-deep)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--brand-ink)}
+.btn.ghost:hover{background:var(--ok-bg)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+
+/* Результаты */
+.results{min-width:0;display:flex;flex-direction:column;gap:0;padding:0}
+.res-head{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--line);border-radius:var(--r-l) var(--r-l) 0 0;padding:14px 18px 0;display:flex;flex-direction:column;gap:12px}
+.res-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.exports{display:flex;flex-wrap:wrap;gap:6px}
+.tabs{display:flex;gap:2px;overflow-x:auto;scrollbar-width:thin;margin:0 -6px;padding:0 6px}
+.tab{position:relative;border:0;background:transparent;padding:10px 14px 12px;font-size:14.5px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap;display:flex;gap:8px;align-items:center}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected=true]{color:var(--brand-deep);font-weight:600}
+.tab[aria-selected=true]::after{content:"";position:absolute;left:10px;right:10px;bottom:0;height:3px;border-radius:3px 3px 0 0;background:var(--brand)}
+.badge{min-width:20px;height:20px;padding:0 6px;border-radius:999px;font-size:12px;font-weight:600;display:inline-grid;place-items:center;font-variant-numeric:tabular-nums}
+.badge.crit{background:var(--crit);color:#fff}.badge.warn{background:var(--warn-bg);color:var(--warn)}.badge.n{background:var(--surface-3);color:var(--muted)}
+.pane{padding:18px;display:flex;flex-direction:column;gap:20px}
+.pane[hidden]{display:none!important}
+.pane h3{font-size:15px;font-weight:600}
+.pane h3 small{font-weight:400;color:var(--muted);font-size:13px;margin-left:6px}
+.block{display:flex;flex-direction:column;gap:10px;min-width:0}
+
+/* Вердикт */
+.verdict{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;padding:20px;border-radius:var(--r-l);background:linear-gradient(135deg,#0B4F21 0%,#0A7429 60%,#13A538 100%);color:#fff;position:relative;overflow:hidden}
+.verdict::after{content:"";position:absolute;right:-40px;top:-40px;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(200,212,0,.35),rgba(200,212,0,0) 70%);pointer-events:none}
+@media (min-width:720px){.verdict{grid-template-columns:auto minmax(0,1fr);align-items:center}}
+.v-num{font-family:var(--f-display);font-weight:700;font-size:clamp(48px,7vw,72px);line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.v-unit{font-family:var(--f-display);font-size:16px;font-weight:500;margin-top:6px;opacity:.9}
+.v-spec{display:flex;flex-direction:column;gap:10px;min-width:0;position:relative;z-index:1}
+.v-spec .line{font-size:16px;font-weight:500}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12.5px;font-weight:600;background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.22)}
+.chip.lime{background:var(--citron);color:#273000;border-color:var(--citron)}
+.chip.bad{background:#fff;color:var(--crit);border-color:#fff}
+
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.kpi{border:1px solid var(--line);border-radius:var(--r-m);padding:14px;display:flex;flex-direction:column;gap:4px;background:var(--surface)}
+.kpi .k{font-size:12.5px;color:var(--muted);font-weight:500}
+.kpi .v{font-family:var(--f-display);font-weight:600;font-size:22px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.kpi .d{font-size:12.5px;color:var(--muted)}
+
+/* Таблицы */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-m)}
+table.t{width:100%;border-collapse:collapse;font-size:14px}
+table.t th,table.t td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+table.t thead th{background:var(--surface-2);font-size:12.5px;font-weight:600;color:var(--muted);white-space:nowrap}
+table.t tbody tr:last-child td,table.t tbody tr:last-child th{border-bottom:0}
+table.t td.r,table.t th.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.t tr.sel td,table.t tr.sel th{background:var(--ok-bg)}
+table.t tr.click{cursor:pointer}
+table.t tr.click:hover td{background:var(--surface-2)}
+table.t .better{color:var(--ok);font-weight:600}
+table.t .worse{color:var(--crit);font-weight:600}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;background:var(--surface-3);color:var(--muted);white-space:nowrap}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}.tag.warn{background:var(--warn-bg);color:var(--warn)}.tag.crit{background:var(--crit-bg);color:var(--crit)}
+
+/* Диск: полоса состава */
+.stack{display:flex;height:34px;border-radius:var(--r-s);overflow:hidden;border:1px solid var(--line);background:var(--surface-2)}
+.stack i{display:block;height:100%;min-width:2px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:12px;height:12px;border-radius:3px;display:inline-block}
+.disk-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.dcard{border:1px solid var(--line);border-radius:var(--r-m);padding:14px;display:flex;flex-direction:column;gap:6px}
+.dcard .role{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
+.dcard .big{font-family:var(--f-display);font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.dcard .path{font-family:var(--f-mono);font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.dcard.main{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand)}
+.meter{height:8px;border-radius:99px;background:var(--surface-3);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--brand)}
+.meter.warn i{background:#D99A00}.meter.crit i{background:var(--crit)}
+
+/* Проверки */
+.checks{display:flex;flex-direction:column;gap:8px}
+.chk{display:grid;grid-template-columns:28px minmax(0,1fr);gap:4px 12px;padding:12px 14px;border-radius:var(--r-m);border:1px solid var(--line)}
+.chk .ic{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px;grid-row:span 3}
+.chk.crit{background:var(--crit-bg);border-color:#F4C7C1}.chk.crit .ic{background:var(--crit);color:#fff}
+.chk.warn{background:var(--warn-bg);border-color:#F0D9A2}.chk.warn .ic{background:#D99A00;color:#fff}
+.chk.ok{background:var(--surface)}.chk.ok .ic{background:var(--ok-bg);color:var(--ok)}
+.chk.info{background:var(--info-bg);border-color:#C9DAEC}.chk.info .ic{background:var(--info);color:#fff}
+.chk .tt{font-weight:600;font-size:14.5px}
+.chk .tt small{font-weight:500;color:var(--muted);font-size:12px;margin-left:8px;text-transform:uppercase;letter-spacing:.05em}
+.chk p{margin:0;font-size:13.5px}
+.chk .fix{color:var(--brand-deep)}
+.chk.crit .fix,.chk.warn .fix{color:var(--ink)}
+.chk .fix b{font-weight:600}
+
+/* Код */
+.code{border:1px solid var(--line);border-radius:var(--r-m);overflow:hidden;background:#0F1A13}
+.code-h{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px 8px 14px;background:#16261C;color:#DDE7D8;font-size:13px}
+.code-h b{font-family:var(--f-mono);font-weight:500;color:var(--citron)}
+.code-h span{color:#9FB39A}
+.code pre{margin:0;padding:14px;overflow:auto;max-height:520px;color:#E5EEE0;font-family:var(--f-mono);font-size:12.8px;line-height:1.55;tab-size:4}
+.code pre .c{color:#8FA88A}
+.code pre .k{color:#C8D400}
+.code pre .s{color:#9BD38A}
+.copy{height:30px;padding:0 10px;font-size:12.5px;border-radius:5px;border:1px solid #38503F;background:#1E3326;color:#E5EEE0;cursor:pointer}
+.copy:hover{background:#28432F}
+.prose{font-size:14px;max-width:78ch}
+.prose p{margin:0 0 8px}
+.prose ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.formula{font-family:var(--f-mono);font-size:13px;background:var(--surface-2);border-radius:var(--r-s);padding:10px 12px;overflow-x:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.split{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.muted{color:var(--muted)}
+.empty{padding:40px 20px;text-align:center;color:var(--muted)}
+.rep-box{border-radius:var(--r-m);padding:12px 14px;display:flex;flex-direction:column;gap:6px;font-size:13.5px;border:1px solid var(--line);background:var(--surface-2)}
+.rep-box .rb-h{font-weight:600;font-size:14px}
+.rep-box.bad{background:var(--crit-bg);border-color:#F4C7C1}
+.rep-box.mid{background:var(--warn-bg);border-color:#F0D9A2}
+.rep-box.good{background:var(--ok-bg);border-color:#BFE3C9}
+.rep-box ul{margin:0;padding-left:18px}
+
+/* Тост */
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);opacity:0;background:var(--ink);color:#fff;padding:10px 16px;border-radius:var(--r-m);font-size:14px;z-index:100;transition:opacity .2s,transform .2s;pointer-events:none;max-width:calc(100% - 32px)}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.foot{max-width:1560px;margin:24px auto 0;color:var(--muted);font-size:12.5px;display:flex;flex-wrap:wrap;gap:6px 20px;justify-content:space-between}
+.foot a{color:var(--brand-ink)}
+a{color:var(--brand-ink)}
+@media (max-width:520px){
+  .pane{padding:14px}
+  .res-head{padding:12px 14px 0}
+  details.sect>summary{padding:12px 14px}
+  .sect-body{padding:2px 14px 14px}
+  .groups .w-type{width:38%}.groups .w-n{width:30%}.groups .w-p{width:24%}
+  .groups th:nth-child(4),.groups td.pps{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---- 2.0 ---- */
+[hidden]{display:none!important}
+img{max-width:100%}
+.top{position:relative}
+.ver{display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:2px 8px;border-radius:999px;background:var(--ok-bg);color:var(--brand-deep);font-size:12px;font-weight:600;vertical-align:2px}
+.actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.menu{position:relative}
+.menu>summary{list-style:none;cursor:pointer}
+.menu>summary::-webkit-details-marker{display:none}
+.menu-pop{position:absolute;right:0;top:calc(100% + 6px);z-index:40;min-width:250px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-m);box-shadow:0 8px 28px rgba(21,32,26,.16);padding:6px;display:flex;flex-direction:column}
+.menu-pop button,.menu-pop label{display:flex;align-items:center;gap:10px;min-height:40px;padding:0 12px;border:0;background:none;border-radius:6px;cursor:pointer;text-align:left;font-size:14px;color:var(--ink)}
+.menu-pop button:hover,.menu-pop label:hover{background:var(--surface-2)}
+.menu-pop hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+details.more{border-top:1px dashed var(--line);padding-top:10px}
+details.more>summary{cursor:pointer;color:var(--brand-ink);font-size:14px;font-weight:500;list-style:none;display:flex;align-items:center;gap:6px;min-height:32px}
+details.more>summary::-webkit-details-marker{display:none}
+details.more>summary::before{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);transition:transform .15s;margin-right:2px}
+details.more[open]>summary::before{transform:rotate(45deg)}
+details.more>.more-body{display:flex;flex-direction:column;gap:12px;padding-top:10px}
+.seg.wide{display:flex}.seg.wide label{flex:1}.seg.wide span{text-align:center}
+.attn{display:flex;flex-direction:column;gap:6px}
+.attn-i{display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;align-items:start;padding:10px 12px;border-radius:var(--r-m);font-size:14px}
+.attn-i .ic{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:12px;color:#fff}
+.attn-i.crit{background:var(--crit-bg)}.attn-i.crit .ic{background:var(--crit)}
+.attn-i.warn{background:var(--warn-bg)}.attn-i.warn .ic{background:#B07800}
+.attn-i b{font-weight:600}
+.attn-i p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.linkbtn{border:0;background:none;color:var(--brand-ink);font-weight:500;cursor:pointer;padding:4px 0;text-decoration:underline;text-underline-offset:3px}
+.cmp3 th.r,.cmp3 td.r{width:24%}
+.cmp3 td.sel,.cmp3 th.sel{background:var(--ok-bg)}
+.topo{display:flex;flex-direction:column;gap:12px}
+.topo-dc{border:1px solid var(--line);border-radius:var(--r-m);padding:12px;display:flex;flex-direction:column;gap:10px}
+.topo-h{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between}
+.topo-h b{font-size:15px}
+.topo-racks{display:flex;flex-wrap:wrap;gap:10px}
+.rack{border:1px dashed var(--line-strong);border-radius:var(--r-m);padding:8px;display:flex;flex-direction:column;gap:8px;align-items:center;min-width:92px}
+.rack-l{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.04em;cursor:pointer;background:none;border:0;padding:2px 6px;border-radius:4px}
+.rack-l:hover{color:var(--brand-ink);background:var(--surface-2)}
+.nodes{display:grid;grid-template-columns:repeat(4,30px);gap:6px;justify-content:center}
+.nd{width:30px;height:30px;border-radius:50%;border:2px solid var(--brand);background:var(--ok-bg);color:var(--brand-deep);font-size:11px;font-weight:600;cursor:pointer;padding:0;display:grid;place-items:center}
+.nd:hover{box-shadow:0 0 0 3px rgba(19,165,56,.2)}
+.nd.down{background:var(--crit);border-color:var(--crit);color:#fff}
+.stepper{display:inline-flex;align-items:stretch;border:1px solid var(--line-strong);border-radius:6px;overflow:hidden;background:var(--surface)}
+.stepper button{border:0;background:var(--surface-2);width:30px;cursor:pointer;font-size:16px;line-height:1}
+.stepper button:hover{background:var(--ok-bg);color:var(--brand-deep)}
+.stepper input{width:44px;border:0;text-align:center;padding:4px 2px;font-variant-numeric:tabular-nums;-moz-appearance:textfield;background:transparent}
+.stepper input::-webkit-inner-spin-button{-webkit-appearance:none}
+.ft-status{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.ft-st{border:1px solid var(--line);border-radius:var(--r-m);padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+.ft-st .t{font-size:12.5px;color:var(--muted)}
+.ft-st .x{font-weight:600}
+.ok-t{color:var(--ok)}.bad-t{color:var(--crit)}.mid-t{color:var(--warn)}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}.pill.bad{background:var(--crit-bg);color:var(--crit)}.pill.na{background:var(--surface-3);color:var(--muted)}
+.kpi .v.ok{color:var(--ok)}.kpi .v.bad{color:var(--crit)}.kpi .v.mid{color:var(--warn)}
+textarea{width:100%;min-height:120px;border:1px solid var(--line-strong);border-radius:var(--r-s);padding:10px;font-family:var(--f-mono);font-size:13px;resize:vertical;background:var(--surface)}
+.cal-res{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.chart svg text{fill:var(--muted)}
+dialog{border:0;border-radius:var(--r-l);padding:0;max-width:min(680px,calc(100% - 32px));box-shadow:0 20px 60px rgba(21,32,26,.3)}
+dialog::backdrop{background:rgba(21,32,26,.45)}
+.dlg{padding:22px 24px;display:flex;flex-direction:column;gap:12px}
+.dlg ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.dlg-f{display:flex;justify-content:flex-end}
+.print-only{display:none}
+@media print{
+  @page{size:A4;margin:12mm}
+  body{background:#fff;padding:0}
+  .top .actions,.inputs,.res-head,.foot,.toast,.no-print{display:none!important}
+  .app{display:block;margin:0}
+  .results{position:static!important;max-height:none!important;overflow:visible!important;border:0;box-shadow:none}
+  .pane{display:none!important}
+  .print-only{display:block}
+  .print-only details.more{display:none}
+  .print-only .pane{display:flex!important;padding:0 0 12px}
+  .verdict{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .stack,.legend i,.meter i,.chip,.tag,.pill,.chk,.attn-i{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .code pre{max-height:none;white-space:pre-wrap}
+  h3{break-after:avoid}
+  .tbl-wrap,.kpi,.dcard,.chk,.code{break-inside:avoid}
+  .pb{break-before:page}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="mark" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div>
+      <h1>Калькулятор TSDB Cassandra<span class="ver">2.0.1</span></h1>
+      <p>Apache Cassandra <span id="cv">5.0.9</span> · JDK 17 · <code>"TSDB".data_points</code> для MES</p>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn" type="button" id="ex-pdf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="6" y="14" width="12" height="7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/></svg>Отчёт PDF</button>
+    <button class="btn" type="button" id="ex-xlsx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>Excel</button>
+    <button class="btn" type="button" id="ex-zip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>Конфиги .zip</button>
+    <details class="menu" id="menu">
+      <summary class="btn" aria-label="Другие действия">Ещё<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="menu-pop">
+        <button type="button" id="m-save">Добавить расчёт в сравнение</button>
+        <button type="button" id="m-link">Скопировать ссылку на расчёт</button>
+        <hr>
+        <button type="button" id="m-json">Сохранить сценарий .json</button>
+        <label for="im-json">Загрузить сценарий .json</label>
+        <hr>
+        <button type="button" id="m-new">Что нового в 2.0</button>
+        <button type="button" id="m-reset">Сбросить все значения</button>
+      </div>
+    </details>
+    <input type="file" id="im-json" accept=".json,application/json" class="sr">
+  </div>
+</header>
+
+<main class="app" id="main">
+  <section class="inputs" aria-label="Исходные данные">
+
+    <section class="card"><div class="sect-body" style="padding-top:16px">
+      <div class="fld"><span class="lbl" id="lbl-mode">Развёртывание</span>
+        <div class="seg wide" role="radiogroup" aria-labelledby="lbl-mode">
+          <label><input type="radio" name="mode" value="standalone" data-k="mode"><span>Одна нода</span></label>
+          <label><input type="radio" name="mode" value="cluster" data-k="mode"><span>Кластер</span></label>
+        </div></div>
+      <div class="fld"><span class="lbl" id="lbl-hw">Оборудование</span>
+        <div class="seg wide" role="radiogroup" aria-labelledby="lbl-hw">
+          <label><input type="radio" name="hw" value="recommend" data-k="hw"><span>Подобрать</span></label>
+          <label><input type="radio" name="hw" value="own" data-k="hw"><span>Проверить своё</span></label>
+        </div></div>
+      <div class="grid g3" data-show="hw=own">
+        <div class="fld"><label for="f-ownCores">Ядер CPU</label><input type="number" id="f-ownCores" data-k="ownCores" min="2" step="1"></div>
+        <div class="fld"><label for="f-ownRam">RAM, ГБ</label><input type="number" id="f-ownRam" data-k="ownRam" min="8" step="8"></div>
+        <div class="fld"><label for="f-ownDrives">Data-дисков</label><input type="number" id="f-ownDrives" data-k="ownDrives" min="1" step="1"></div>
+        <div class="fld"><label for="f-ownDrive">Объём диска, ТБ</label><input type="number" id="f-ownDrive" data-k="ownDrive" min="0.1" step="0.01"></div>
+      </div>
+    </div></section>
+
+    <details class="sect card" open>
+      <summary><h2>Сигналы MES</h2><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="sect-body">
+        <table class="groups" aria-label="Группы тегов">
+          <thead><tr><th class="w-type">Тип</th><th class="w-n">Тегов</th><th class="w-p">Период, с</th><th class="r">Точек/с</th><th class="w-x"><span class="sr">Удалить</span></th></tr></thead>
+          <tbody id="groups"></tbody>
+        </table>
+        <div class="row-actions">
+          <button class="btn" type="button" id="add-group"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Добавить группу</button>
+          <div class="fld" style="flex:1 1 170px;max-width:230px"><label for="preset" class="sr">Пример нагрузки</label>
+            <select id="preset"><option value="">Загрузить пример…</option></select></div>
+        </div>
+        <div class="totals" id="totals" aria-live="polite"></div>
+        <div class="grid g3">
+          <div class="fld"><label for="f-strLen">Длина STRING</label><input type="number" id="f-strLen" data-k="strLen" min="0" step="1"></div>
+          <div class="fld"><label for="f-annPct">Аннотации, %</label><input type="number" id="f-annPct" data-k="annPct" min="0" max="100" step="0.1"></div>
+          <div class="fld"><label for="f-annLen">Длина аннотации</label><input type="number" id="f-annLen" data-k="annLen" min="0" step="1"></div>
+        </div>
+        <details class="more"><summary>Дополнительно</summary><div class="more-body">
+          <div class="grid g3">
+            <div class="fld"><label for="f-strEnc">Текст STRING</label><select id="f-strEnc" data-k="strEnc"><option value="lat">Латиница</option><option value="mix">Смешанный</option><option value="cyr">Кириллица</option></select></div>
+            <div class="fld"><label for="f-annEnc">Текст аннотаций</label><select id="f-annEnc" data-k="annEnc"><option value="lat">Латиница</option><option value="mix">Смешанный</option><option value="cyr">Кириллица</option></select></div>
+            <div class="fld"><label for="f-peak">Пик потока, ×</label><input type="number" id="f-peak" data-k="peak" min="1" step="0.5"></div>
+          </div>
+          <p class="hint">Пик: во сколько раз поток кратко растёт, когда после обрыва связи сервер сбора досылает накопленный буфер.</p>
+          <div class="fld"><label for="f-partMs">PartitionSize, мс</label><input type="number" id="f-partMs" data-k="partMs" min="1" step="1000000"><p class="hint" id="partHint"></p></div>
+          <label class="check"><input type="checkbox" data-k="snapPer" id="f-snapPer"><span>Таблица snapshots обновляется на каждую точку<small>Текущее значение тега пишется вместе с точкой: поток записи удваивается.</small></span></label>
+        </div></details>
+      </div>
+    </details>
+
+    <details class="sect card" open>
+      <summary><h2>Хранение</h2><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="sect-body">
+        <div class="grid g3">
+          <div class="fld"><label for="f-retention">Глубина, сут</label><input type="number" id="f-retention" data-k="retention" min="1" step="1"></div>
+          <div class="fld"><label for="f-growth">Рост тегов, %/год</label><input type="number" id="f-growth" data-k="growth" min="0" step="1"></div>
+          <div class="fld"><label for="f-years">Горизонт, лет</label><input type="number" id="f-years" data-k="years" min="0" max="15" step="1"></div>
+        </div>
+        <div class="fld"><span class="lbl" id="lbl-comp">Сжатие data_points</span>
+          <div class="seg wide" role="radiogroup" aria-labelledby="lbl-comp">
+            <label><input type="radio" name="comp" value="lz4" data-k="comp"><span>LZ4</span></label>
+            <label><input type="radio" name="comp" value="none" data-k="comp"><span>Без сжатия</span></label>
+          </div>
+          <p class="hint" id="compHint"></p></div>
+        <details class="more"><summary>Как сейчас удаляются данные</summary><div class="more-body">
+          <div class="grid">
+            <div class="fld"><label for="f-cleanup">Удаление старых данных</label><select id="f-cleanup" data-k="cleanup"><option value="delete">DELETE партиций по расписанию</option><option value="delete_gc">DELETE + nodetool garbagecollect</option><option value="truncate">TRUNCATE таблицы</option></select></div>
+            <div class="fld" data-show="cleanup=delete_gc|truncate"><label for="f-cleanInt">Интервал очистки, сут</label><input type="number" id="f-cleanInt" data-k="cleanInt" min="1" step="1"></div>
+            <div class="fld"><label for="f-backups">incremental_backups</label><select id="f-backups" data-k="backups"><option value="on_nocleanup">Включено, не чистится</option><option value="on_cleanup">Включено, выгрузка и очистка</option><option value="off">Выключено</option></select></div>
+            <div class="fld" data-show="backups=on_cleanup"><label for="f-backInt">Очистка backups/, сут</label><input type="number" id="f-backInt" data-k="backInt" min="1" step="1"></div>
+          </div>
+          <p class="hint">Влияет только на вариант «Текущая схема». В рекомендациях удаление по TTL таблицы.</p>
+        </div></details>
+      </div>
+    </details>
+
+    <details class="sect card" open>
+      <summary><h2>Отказоустойчивость</h2><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="sect-body">
+        <p class="hint" data-show="mode=standalone">Одна нода хранит одну копию данных. Отказ сервера останавливает работу MES до восстановления.</p>
+        <div data-show="mode=cluster" class="sect-body" style="padding:0">
+          <div class="grid g3">
+            <div class="fld"><label for="f-dc">Дата-центров</label><input type="number" id="f-dc" data-k="dc" min="1" max="5" step="1"></div>
+            <div class="fld"><label for="f-F">Может отказать нод</label><input type="number" id="f-F" data-k="F" min="0" max="3" step="1"></div>
+          </div>
+          <div class="fld"><span class="lbl" id="lbl-cons">Тренды и отчёты</span>
+            <div class="seg wide" role="radiogroup" aria-labelledby="lbl-cons">
+              <label><input type="radio" name="cons" value="strong" data-k="cons"><span>Всегда свежие</span></label>
+              <label><input type="radio" name="cons" value="eventual" data-k="cons"><span>Допустима задержка</span></label>
+            </div></div>
+          <div id="repBox" class="rep-box" aria-live="polite"></div>
+          <details class="more" id="more-rep"><summary>RF, consistency level, racks</summary><div class="more-body">
+            <label class="check"><input type="checkbox" data-k="manual" id="f-manual"><span>Задать RF и consistency level вручную</span></label>
+            <div data-show="manual=true" class="more-body" style="padding:0">
+              <div class="grid g3" id="rfGrid"></div>
+              <div class="grid g3">
+                <div class="fld"><label for="f-wcl">Запись</label><select id="f-wcl" data-k="wcl"></select></div>
+                <div class="fld"><label for="f-rcl">Чтение</label><select id="f-rcl" data-k="rcl"></select></div>
+              </div>
+              <label class="check"><input type="checkbox" data-k="lwt" id="f-lwt"><span>MES использует LWT (IF NOT EXISTS)</span></label>
+              <div class="fld" data-show="lwt=true"><label for="f-scl">Serial consistency</label><select id="f-scl" data-k="scl"><option>LOCAL_SERIAL</option><option>SERIAL</option></select></div>
+            </div>
+            <div class="grid">
+              <div class="fld"><label for="f-rackPolicy">Racks</label><select id="f-rackPolicy" data-k="rackPolicy"><option value="rf">По стойке на реплику (racks = RF)</option><option value="one">Один rack</option></select></div>
+              <div class="fld"><label for="f-numTokens">num_tokens</label><select id="f-numTokens" data-k="numTokens"><option value="1">1</option><option value="4">4</option><option value="8">8</option><option value="16">16 (по умолчанию)</option><option value="32">32</option></select></div>
+            </div>
+          </div></details>
+        </div>
+      </div>
+    </details>
+
+    <details class="sect card" open>
+      <summary><h2>Пользователи</h2><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="sect-body">
+        <div class="grid">
+          <div class="fld"><label for="f-users">Работают одновременно</label><input type="number" id="f-users" data-k="users" min="0" step="1"></div>
+          <div class="fld"><label for="f-usage">Профиль работы</label><select id="f-usage" data-k="usage"><option value="light">Редкие обращения</option><option value="typical">Типовой</option><option value="heavy">Активная аналитика</option><option value="custom">Свой</option></select></div>
+        </div>
+        <p class="hint" id="usageHint"></p>
+        <div data-show="usage=custom" class="more-body" style="padding:0">
+          <p class="sub">На одного пользователя</p>
+          <div class="grid g3">
+            <div class="fld"><label for="f-trOpen">Трендов в час</label><input type="number" id="f-trOpen" data-k="trOpen" min="0" step="1"></div>
+            <div class="fld"><label for="f-trTags">Тегов на тренде</label><input type="number" id="f-trTags" data-k="trTags" min="0" step="1"></div>
+            <div class="fld"><label for="f-trWin">Окно тренда, ч</label><input type="number" id="f-trWin" data-k="trWin" min="0.1" step="1"></div>
+            <div class="fld"><label for="f-trRef">Обновление тренда, с</label><input type="number" id="f-trRef" data-k="trRef" min="1" step="1"></div>
+            <div class="fld"><label for="f-mnTags">Тегов на мнемосхеме</label><input type="number" id="f-mnTags" data-k="mnTags" min="0" step="1"></div>
+            <div class="fld"><label for="f-mnRef">Обновление мнемосхемы, с</label><input type="number" id="f-mnRef" data-k="mnRef" min="0.5" step="0.5"></div>
+            <div class="fld"><label for="f-repH">Отчётов в час</label><input type="number" id="f-repH" data-k="repH" min="0" step="0.5"></div>
+            <div class="fld"><label for="f-repTags">Тегов в отчёте</label><input type="number" id="f-repTags" data-k="repTags" min="0" step="1"></div>
+            <div class="fld"><label for="f-repDays">Период отчёта, сут</label><input type="number" id="f-repDays" data-k="repDays" min="0.01" step="1"></div>
+          </div>
+        </div>
+        <details class="more"><summary>Требования к задержкам и восстановлению</summary><div class="more-body">
+          <div class="grid">
+            <div class="fld"><label for="f-slaW">p99 записи, мс</label><input type="number" id="f-slaW" data-k="slaW" min="0" step="1"></div>
+            <div class="fld"><label for="f-slaR">p99 чтения, мс</label><input type="number" id="f-slaR" data-k="slaR" min="0" step="1"></div>
+            <div class="fld"><label for="f-rpo">Потеря данных (RPO), с</label><input type="number" id="f-rpo" data-k="rpo" min="0" step="1"></div>
+            <div class="fld" data-show="mode=cluster"><label for="f-rto">Замена ноды (RTO), ч</label><input type="number" id="f-rto" data-k="rto" min="0" step="0.5"></div>
+          </div>
+          <p class="hint">0 — требование не задано.</p>
+        </div></details>
+      </div>
+    </details>
+
+    <details class="sect card" open>
+      <summary><h2>Инфраструктура</h2><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="sect-body">
+        <div class="fld"><span class="lbl" id="lbl-disk">Накопители</span>
+          <div class="seg wide" role="radiogroup" aria-labelledby="lbl-disk">
+            <label><input type="radio" name="disk" value="nvme" data-k="disk"><span>NVMe</span></label>
+            <label><input type="radio" name="disk" value="ssd" data-k="disk"><span>SATA SSD</span></label>
+            <label><input type="radio" name="disk" value="hdd" data-k="disk"><span>HDD</span></label>
+          </div></div>
+        <div class="fld"><label for="f-raid">RAID data-диска</label><select id="f-raid" data-k="raid"><option value="none">Без RAID, один диск</option><option value="raid0">RAID 0</option><option value="jbod">JBOD</option><option value="raid1">RAID 1</option><option value="raid10">RAID 10</option><option value="raid5">RAID 5</option><option value="raid6">RAID 6</option></select></div>
+        <details class="more"><summary>Диски и сеть подробнее</summary><div class="more-body">
+          <div class="grid">
+            <div class="fld" data-show="hw=recommend"><label for="f-drive">Объём накопителя</label><select id="f-drive" data-k="drive"></select></div>
+            <div class="fld"><label for="f-maxNodeTB">Данных на ноду, не больше, ТБ</label><input type="number" id="f-maxNodeTB" data-k="maxNodeTB" min="0.5" step="0.5"></div>
+            <div class="fld" data-show="mode=cluster"><label for="f-netIn">Сеть между нодами, Гбит/с</label><input type="number" id="f-netIn" data-k="netIn" min="0.1" step="1"></div>
+            <div class="fld" data-show="mode=cluster"><label for="f-rttIn">Задержка между нодами, мс</label><input type="number" id="f-rttIn" data-k="rttIn" min="0" step="0.1"></div>
+            <div class="fld" data-show="dcmulti"><label for="f-netDc">Канал между ДЦ, Гбит/с</label><input type="number" id="f-netDc" data-k="netDc" min="0.01" step="0.1"></div>
+            <div class="fld" data-show="dcmulti"><label for="f-rttDc">Задержка между ДЦ, мс</label><input type="number" id="f-rttDc" data-k="rttDc" min="0" step="1"></div>
+          </div>
+        </div></details>
+      </div>
+    </details>
+  </section>
+
+  <section class="results card" aria-label="Результаты расчёта">
+    <div class="res-head">
+      <div class="res-bar">
+        <div class="seg" role="radiogroup" aria-label="Вариант схемы">
+          <label><input type="radio" name="variant" value="cur" id="var-cur"><span>Текущая схема</span></label>
+          <label><input type="radio" name="variant" value="rec" id="var-rec"><span>Рекомендации</span></label>
+          <label><input type="radio" name="variant" value="unset" id="var-unset"><span>+ доработка драйвера</span></label>
+        </div>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Разделы результата">
+        <button class="tab" role="tab" id="tab-sum" aria-controls="pane-sum" aria-selected="true">Итог</button>
+        <button class="tab" role="tab" id="tab-disk" aria-controls="pane-disk" aria-selected="false">Диски</button>
+        <button class="tab" role="tab" id="tab-ft" aria-controls="pane-ft" aria-selected="false">Отказоустойчивость</button>
+        <button class="tab" role="tab" id="tab-cfg" aria-controls="pane-cfg" aria-selected="false">Конфигурация</button>
+        <button class="tab" role="tab" id="tab-cal" aria-controls="pane-cal" aria-selected="false">Калибровка <span id="cal-badge"></span></button>
+        <button class="tab" role="tab" id="tab-met" aria-controls="pane-met" aria-selected="false">Методика</button>
+        <button class="tab" role="tab" id="tab-cmp" aria-controls="pane-cmp" aria-selected="false" hidden>Сравнение <span id="cmp-badge"></span></button>
+      </div>
+    </div>
+    <div class="pane" role="tabpanel" id="pane-sum" aria-labelledby="tab-sum"></div>
+    <div class="pane" role="tabpanel" id="pane-disk" aria-labelledby="tab-disk" hidden></div>
+    <div class="pane" role="tabpanel" id="pane-ft" aria-labelledby="tab-ft" hidden></div>
+    <div class="pane" role="tabpanel" id="pane-cfg" aria-labelledby="tab-cfg" hidden></div>
+    <div class="pane" role="tabpanel" id="pane-cal" aria-labelledby="tab-cal" hidden></div>
+    <div class="pane" role="tabpanel" id="pane-met" aria-labelledby="tab-met" hidden></div>
+    <div class="pane" role="tabpanel" id="pane-cmp" aria-labelledby="tab-cmp" hidden></div>
+    <div class="print-only" id="print"></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <span>Медианная оценка для старта внедрения и проектной документации. Объём сверен с Apache Cassandra 5.0.9 на типовом профиле значений; на действующей инсталляции уточняется во вкладке «Калибровка».</span>
+  <span>Версия 2.0.1 · <button type="button" class="linkbtn" id="f-new">Что нового</button></span>
+</footer>
+<dialog id="dlg-new" aria-labelledby="dlg-new-h"><div class="dlg">
+  <h2 id="dlg-new-h" style="font-size:18px">Что нового в 2.0</h2>
+  <ul>
+    <li>Объём на диске считается по точному формату строк SSTable Cassandra 5.0.9 с учётом сжатия LZ4 16 КиБ. Модель сверена с официальным дистрибутивом 5.0.9: побайтно с SSTable, записанными кодом Cassandra, и с точностью 0,12 % на запущенном сервере.</li>
+    <li>Сравнение LZ4 и хранения без сжатия.</li>
+    <li>Калибровка по выводу <code>nodetool tablestats</code> с действующей инсталляции.</li>
+    <li>Встроен калькулятор отказоустойчивости: racks, несколько ДЦ, размещение реплик как в NetworkTopologyStrategy, интерактивная схема отказов, вероятность при случайных отказах.</li>
+    <li>Третий вариант схемы: доработка драйвера C# (Unset.Value вместо null).</li>
+    <li>Конфигурация драйвера C#, cassandra-rackdc.properties на каждую ноду.</li>
+    <li>Работает без интернета: Excel, ZIP и отчёт PDF формируются внутри страницы.</li>
+    <li>Меньше полей: профиль пользователей одним выбором, параметры для архитектора спрятаны в «Дополнительно».</li>
+    <li>2.0.1: по итогам проверки на сервере 5.0.9 уточнён вариант с Unset.Value (маска колонок 2 байта), заголовок партиции формата nb, в cassandra.yaml добавлены storage_compatibility_mode: NONE и формат BTI.</li>
+  </ul>
+  <div class="dlg-f"><button class="btn primary" type="button" id="dlg-new-close">Понятно</button></div>
+</div></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+/* Модель размера строки "TSDB".data_points на диске, Apache Cassandra 5.0.9 (форматы oa / da).
+ * Сериализация: UnfilteredSerializer, Cell.Serializer, Columns.serializeSubset, ClusteringPrefix (5.0.9).
+ * Сжатие LZ4 16 КиБ: коэффициенты получены эталонной моделью (ref/measure.py) на liblz4 1.9.4,
+ * которая побайтно совпала с Data.db из test/data/legacy-sstables (oa, da) репозитория 5.0.9.
+ */
+(function (root) {
+  'use strict';
+  const COMP = {"src": "ref/measure.py, liblz4 1.9.4, LZ4 16 КиБ, профиль значений: медиана", "periods": [0.1, 1, 10, 60, 600], "base": {"cur": {"DOUBLE": [19.348, 30.627, 31.033, 31.536, 24.779], "FLOAT": [18.676, 32.352, 32.86, 33.656, 26.468], "LONG": [18.052, 33.939, 33.704, 33.563, 26.561], "DATETIME": [15.02, 32.501, 33.306, 34.287, 26.339], "SET": [15.507, 34.728, 34.256, 33.276, 26.249], "STRING": [16.243, 26.991, 27.63, 27.772, 26.124]}, "rec": {"DOUBLE": [19.736, 34.707, 35.657, 36.045, 38.475], "FLOAT": [19.272, 36.11, 37.149, 38.097, 40.776], "LONG": [17.503, 38.231, 38.043, 37.903, 39.157], "DATETIME": [15.277, 36.423, 37.401, 38.562, 41.939], "SET": [15.408, 39.623, 38.698, 37.565, 38.772], "STRING": [17.226, 32.05, 32.424, 32.252, 32.973]}, "unset": {"DOUBLE": [15.506, 18.789, 19.546, 19.845, 20.613], "FLOAT": [14.995, 18.301, 19.132, 19.506, 20.269], "LONG": [13.897, 17.396, 18.091, 18.941, 19.44], "DATETIME": [12.966, 18.275, 19.179, 20.172, 20.83], "SET": [12.632, 16.346, 17.079, 17.945, 18.543], "STRING": [14.988, 18.394, 19.65, 20.746, 21.657]}}, "str": {"cur": {"bytes": [4, 8, 16, 32, 64, 128, 256, 512], "periods": [1, 10, 60], "lz4": [[24.713, 24.874, 24.515], [25.219, 25.377, 25.645], [26.3, 26.37, 26.583], [26.991, 27.63, 27.772], [29.658, 30.23, 30.203], [33.892, 35.813, 36.013], [46.815, 47.421, 47.98], [73.64, 74.488, 74.397]]}, "rec": {"bytes": [4, 8, 16, 32, 64, 128, 256, 512], "periods": [1, 10, 60], "lz4": [[29.854, 29.513, 28.981], [30.302, 30.096, 30.173], [31.248, 31.08, 31.11], [32.05, 32.424, 32.252], [34.979, 35.284, 34.843], [39.813, 40.757, 40.902], [52.12, 52.615, 52.797], [78.786, 79.364, 79.483]]}, "unset": {"bytes": [4, 8, 16, 32, 64, 128, 256, 512], "periods": [1, 10, 60], "lz4": [[16.73, 17.406, 18.166], [17.008, 17.711, 18.539], [17.814, 18.847, 19.898], [18.394, 19.65, 20.746], [20.565, 21.459, 22.802], [25.651, 26.333, 27.82], [37.569, 38.16, 38.63], [64.556, 65.166, 65.404]]}}, "ann": {"cur": {"bytes": [16, 64, 128, 256], "periods": [1, 60], "delta": [[11.603, 12.392], [25.016, 27.316], [43.749, 46.62], [80.88, 83.43]]}, "rec": {"bytes": [16, 64, 128, 256], "periods": [1, 60], "delta": [[17.134, 12.542], [32.556, 28.738], [52.2, 48.407], [89.597, 85.351]]}, "unset": {"bytes": [16, 64, 128, 256], "periods": [1, 60], "delta": [[12.771, 12.874], [26.971, 27.299], [44.496, 45.383], [79.575, 80.812]]}}};
+  const TYPES = {
+    DOUBLE: { col: 'double_value', val: 8 }, FLOAT: { col: 'float_value', val: 4 }, LONG: { col: 'long_value', val: 8 },
+    DATETIME: { col: 'long_value', val: 8 }, SET: { col: 'long_value', val: 8 }, STRING: { col: 'string_value', val: null }
+  };
+  const TYPE_ORDER = ['DOUBLE', 'FLOAT', 'LONG', 'DATETIME', 'SET', 'STRING'];
+  const BPC = { lat: 1, mix: 1.5, cyr: 2 };
+
+  function vsize(v) { let n = 1; while (n < 9 && v >= Math.pow(2, 7 * n)) n++; return n; }
+  // Средний размер unsigned vint для значения, равномерно распределённого на [a, b)
+  function avgVint(a, b) {
+    if (b <= a) return vsize(a);
+    let s = 0;
+    for (let n = 1; n <= 9; n++) {
+      const lo = n === 1 ? 0 : Math.pow(2, 7 * (n - 1)), hi = n === 9 ? Infinity : Math.pow(2, 7 * n);
+      const x = Math.max(a, lo), y = Math.min(b, hi);
+      if (y > x) s += n * (y - x);
+    }
+    return s / (b - a);
+  }
+
+  /* Ожидаемый размер строки до сжатия, байт.
+   * variant: cur (явные null, без TTL) | rec (явные null + TTL) | unset (unset + TTL)
+   * o: { type, strBytes, annPct (0..1), annBytes, windowDays, ttlSec } */
+  function rowRaw(o, variant) {
+    const ttl = variant !== 'cur', unset = variant === 'unset';
+    const spanS = o.windowDays * 86400;
+    const ts = avgVint(0, spanS * 1e6);                     // метка записи, мкс от начала окна
+    const offS = avgVint(0, spanS);                         // секунды от начала окна
+    let body = ts;
+    if (ttl) body += 1 + (unset ? offS : avgVint(o.ttlSec, o.ttlSec + spanS)); // TTL (дельта 0) + время истечения
+    if (unset) body += o.type === 'STRING' ? 1 : 2;          // маска отсутствующих колонок из 8 (string_value = бит 7)
+    const t = TYPES[o.type];
+    const sb = o.strBytes || 0;
+    const value = t.val != null ? 1 + t.val : 1 + vsize(sb) + sb;
+    body += value + 5;                                       // значение + quality_mark_statenumber (int)
+    const p = Math.min(1, Math.max(0, o.annPct || 0)), ab = o.annBytes || 0;
+    const annFull = 1 + vsize(ab) + ab;
+    body += unset ? p * annFull : p * annFull + (1 - p) * 1; // '' пишется ячейкой без значения
+    if (!unset) body += 5 * (1 + offS);                      // 5 tombstone-ячеек: флаг + local deletion time
+    const row = 1 + 9 + body;                                // флаги + clustering (заголовок 1 + bigint 8)
+    const len = row + 2;
+    return row + vsize(len) + vsize(len);                    // размер тела и размер предыдущей строки (vint)
+  }
+  // Заголовок партиции и маркер конца: на тег в каждом SSTable окна
+  // DeletionTime 12 байт в формате nb (storage_compatibility_mode: CASSANDRA_4, по умолчанию в cassandra.yaml 5.0), 1 байт в oa/da
+  function partitionBytes(keyLen) { return 2 + keyLen + 12 + 1; }
+
+  // Линейная интерполяция по log(period) и по log(байт строки)
+  function interp(xs, ys, x) {
+    if (x <= xs[0]) return ys[0];
+    if (x >= xs[xs.length - 1]) return ys[ys.length - 1];
+    for (let i = 1; i < xs.length; i++) if (x <= xs[i]) { const k = (x - xs[i - 1]) / (xs[i] - xs[i - 1]); return ys[i - 1] + k * (ys[i] - ys[i - 1]); }
+    return ys[ys.length - 1];
+  }
+  const L = Math.log;
+  // Медленнее 60 с берём не меньше, чем при 60 с: выигрыш на редких тегах зависит от выравнивания меток времени.
+  function clampSlow(arr) { const a = arr.slice(); const i60 = COMP.periods.indexOf(60); for (let i = i60 + 1; i < a.length; i++) a[i] = Math.max(a[i], a[i60]); return a; }
+  // Байт на точку после LZ4 (Data.db, включая CRC чанка), строка без annotation ('' или unset)
+  function lz4Point(type, variant, period, strBytes) {
+    const lp = L(Math.max(0.1, period));
+    const base = clampSlow(COMP.base[variant][type]);
+    const byBase = interp(COMP.periods.map(L), base, lp);
+    if (type !== 'STRING') return byBase;
+    const g = COMP.str[variant];
+    const pc = Math.min(Math.max(period, g.periods[0]), g.periods[g.periods.length - 1]);
+    const lb = L(Math.max(1, strBytes));
+    const byPer = g.periods.map((_, j) => interp(g.bytes.map(L), g.lz4.map(r => r[j]), lb));
+    let v = interp(g.periods.map(L), byPer, L(pc));
+    if (period < g.periods[0]) v *= byBase / interp(COMP.periods.map(L), base, L(g.periods[0])); // поправка на частый опрос
+    return v;
+  }
+  // Прирост сжатого объёма на одну точку с непустой annotation, байт
+  function annDelta(variant, annBytes, period) {
+    const g = COMP.ann[variant];
+    const pc = Math.min(Math.max(period, g.periods[0]), g.periods[g.periods.length - 1]);
+    const byPer = g.periods.map((_, j) => interp(g.bytes.map(L), g.delta.map(r => r[j]), L(Math.max(1, annBytes))));
+    return Math.max(0, interp(g.periods.map(L), byPer, L(pc)));
+  }
+
+  /* Байт на точку на диске (одна копия, Data.db) для группы тегов. comp: 'lz4' | 'none'.
+   * o: { type, period, strBytes, annPct, annBytes, windowDays, ttlSec } */
+  function pointBytes(o, variant, comp) {
+    const raw = rowRaw(o, variant);
+    if (comp === 'none') return { raw, disk: raw, ratio: 1 };
+    const disk = lz4Point(o.type, variant, o.period, o.strBytes || 0) + (o.annPct || 0) * annDelta(variant, o.annBytes || 0, o.period)
+      + 8 / 16384 * raw;                                     // смещение чанка в CompressionInfo.db
+    return { raw, disk, ratio: disk / raw };
+  }
+
+  const API = { TYPES, TYPE_ORDER, BPC, vsize, avgVint, rowRaw, partitionBytes, lz4Point, annDelta, pointBytes, COMP };
+  if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.CSize = API;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* Движок калькулятора отказоустойчивости Apache Cassandra 5.0.
+ * Размещение реплик повторяет NetworkTopologyStrategy.calculateNaturalReplicas из 5.0.9.
+ * Работает в браузере (window.CCalc) и в Node (module.exports). */
+(function (root) {
+  'use strict';
+
+  const CL_LIST = ['ANY', 'ONE', 'TWO', 'THREE', 'QUORUM', 'ALL', 'LOCAL_ONE', 'LOCAL_QUORUM', 'EACH_QUORUM', 'SERIAL', 'LOCAL_SERIAL'];
+  const WRITE_CL = ['ANY', 'ONE', 'TWO', 'THREE', 'QUORUM', 'ALL', 'LOCAL_ONE', 'LOCAL_QUORUM', 'EACH_QUORUM'];
+  const READ_CL = ['ONE', 'TWO', 'THREE', 'QUORUM', 'ALL', 'LOCAL_ONE', 'LOCAL_QUORUM', 'EACH_QUORUM'];
+  const SERIAL_CL = ['SERIAL', 'LOCAL_SERIAL'];
+  const TOKEN_CHOICES = [1, 4, 8, 16, 32, 64, 128, 256];
+  const LIMITS = { maxDc: 5, maxNodesPerDc: 100, maxRacksPerDc: 12, maxRf: 9 };
+
+  function defaultState() {
+    return {
+      cluster: 'MES Cluster', ks: 'TSDB',
+      dcs: [{ name: 'DC1', rf: 3, racks: [1, 1, 1] }],
+      wcl: 'LOCAL_QUORUM', rcl: 'LOCAL_QUORUM', clientDc: 0,
+      lwt: false, scl: 'LOCAL_SERIAL',
+      numTokens: 16, tokenMode: 'balanced', seed: 1,
+      dataGB: '', writesPs: '', readsPs: '', rowBytes: ''
+    };
+  }
+
+  // ---------- утилиты ----------
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function shuffle(arr, rng) {
+    for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = arr[i]; arr[i] = arr[j]; arr[j] = t; }
+    return arr;
+  }
+  const sum = a => a.reduce((s, x) => s + x, 0);
+  function num(v) { const n = parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : null; }
+  function binom(n, k) { if (k < 0 || k > n) return 0; k = Math.min(k, n - k); let r = 1; for (let i = 1; i <= k; i++) { r = r * (n - k + i) / i; if (r > 1e12) return Infinity; } return Math.round(r); }
+
+  // ---------- топология ----------
+  function buildTopology(st) {
+    const errors = [];
+    const dcs = []; const nodes = []; const racks = [];
+    if (!st.dcs || !st.dcs.length) errors.push('Не задан ни один DC.');
+    const names = new Set();
+    (st.dcs || []).forEach((d, di) => {
+      const name = String(d.name || ('DC' + (di + 1))).trim();
+      if (names.has(name)) errors.push('Имя DC «' + name + '» повторяется.');
+      names.add(name);
+      const rf = Math.max(0, Math.floor(num(d.rf) || 0));
+      const rk = (d.racks || []).map(x => Math.max(0, Math.floor(num(x) || 0)));
+      const dc = { idx: di, name, rf, racks: [], nodes: [], N: 0, K: 0 };
+      rk.forEach((n, ri) => {
+        const rack = { gidx: racks.length, dc: di, local: ri, name: 'RACK' + (ri + 1), n, nodes: [] };
+        for (let k = 0; k < n; k++) {
+          const node = { id: nodes.length, dc: di, rack: rack.gidx, rackLocal: ri, name: name.toLowerCase() + '-r' + (ri + 1) + '-n' + (k + 1) };
+          nodes.push(node); rack.nodes.push(node.id); dc.nodes.push(node.id);
+        }
+        if (n > 0) { racks.push(rack); dc.racks.push(rack); }
+      });
+      dc.N = dc.nodes.length; dc.K = dc.racks.length;
+      if (dc.N === 0) errors.push('В ' + name + ' нет ни одной ноды.');
+      if (rf > dc.N && dc.N > 0) errors.push(name + ': RF=' + rf + ' больше числа нод (' + dc.N + '). NetworkTopologyStrategy разместит реплики только на ' + dc.N + ' нодах, а QUORUM и ALL будут считаться от RF=' + rf + '. Уменьшите RF или добавьте ноды.');
+      if (rf > LIMITS.maxRf) errors.push(name + ': RF больше ' + LIMITS.maxRf + ' калькулятор не поддерживает.');
+      if (dc.N > LIMITS.maxNodesPerDc) errors.push(name + ': больше ' + LIMITS.maxNodesPerDc + ' нод в DC калькулятор не поддерживает.');
+      dcs.push(dc);
+    });
+    const rf = dcs.map(d => d.rf);
+    const totRf = sum(rf);
+    if (dcs.length && totRf === 0) errors.push('Сумма RF по всем DC равна 0: keyspace не хранит данных.');
+    if (dcs.length > LIMITS.maxDc) errors.push('Больше ' + LIMITS.maxDc + ' DC калькулятор не поддерживает.');
+    return { dcs, nodes, racks, rf, totRf, N: nodes.length, errors };
+  }
+
+  // ---------- consistency level ----------
+  // Требование CL: минимум живых реплик в каждом DC (mins) и в сумме (g). Формулы как в ConsistencyLevel.blockFor (5.0.9).
+  function requirement(cl, c, T) {
+    const D = T.dcs.length; const mins = new Array(D).fill(0); let g = 0; const rf = T.rf; const tot = T.totRf;
+    let any = false; const q = x => Math.floor(x / 2) + 1;
+    switch (cl) {
+      case 'ANY': any = true; break;
+      case 'ONE': g = 1; break;
+      case 'TWO': g = 2; break;
+      case 'THREE': g = 3; break;
+      case 'QUORUM': case 'SERIAL': g = q(tot); break;
+      case 'ALL': for (let d = 0; d < D; d++) mins[d] = rf[d]; g = tot; break;
+      case 'LOCAL_ONE': mins[c] = 1; break;
+      case 'LOCAL_QUORUM': case 'LOCAL_SERIAL': mins[c] = q(rf[c]); break;
+      case 'EACH_QUORUM': for (let d = 0; d < D; d++) if (rf[d] > 0) mins[d] = q(rf[d]); break;
+    }
+    const acks = any ? 0 : Math.max(g, sum(mins));
+    let ok = true;
+    for (let d = 0; d < D; d++) if (mins[d] > rf[d]) ok = false;
+    if (g > tot) ok = false;
+    // DC, из которых нужен ответ
+    const fromDcs = [];
+    for (let d = 0; d < D; d++) if (mins[d] > 0) fromDcs.push(d);
+    const needsRemote = !any && (fromDcs.some(d => d !== c) || g > (rf[c] || 0));
+    return { cl, c, mins, g, any, acks, ok, needsRemote };
+  }
+  function satisfied(R, live, anyAlive) {
+    if (R.any) return anyAlive;
+    if (!R.ok) return false;
+    let s = 0;
+    for (let d = 0; d < live.length; d++) { if (live[d] < R.mins[d]) return false; s += live[d]; }
+    return s >= R.g;
+  }
+  // Сколько любых нод можно потерять в худшем случае (противник выбивает реплики одного диапазона).
+  function worstNodeTolerance(R, T) {
+    if (R.any) return T.N - 1;
+    if (!R.ok) return -1;
+    let f = Infinity;
+    for (let d = 0; d < T.rf.length; d++) if (R.mins[d] > 0) f = Math.min(f, T.rf[d] - R.mins[d]);
+    if (R.g > 0) f = Math.min(f, T.totRf - R.g);
+    if (!isFinite(f)) f = T.N - 1;
+    return Math.min(f, T.N - 1);
+  }
+  // Гарантированно ли пересекаются множества реплик записи и чтения.
+  // Множества могут не пересечься, если есть распределение w_d, r_d с w_d + r_d <= rf_d.
+  function consistent(W, Rd, T) {
+    if (!W.ok || !Rd.ok) return null;
+    if (W.any) return false;
+    let slack = 0;
+    for (let d = 0; d < T.rf.length; d++) {
+      const s = T.rf[d] - W.mins[d] - Rd.mins[d];
+      if (s < 0) return true;
+      slack += s;
+    }
+    const extraW = Math.max(0, W.g - sum(W.mins));
+    const extraR = Math.max(0, Rd.g - sum(Rd.mins));
+    return extraW + extraR > slack;
+  }
+
+  // ---------- кольцо токенов и размещение реплик ----------
+  function buildRing(T, numTokens, mode, seed) {
+    const rng = mulberry32((seed || 1) * 2654435761 >>> 0);
+    const toks = [];
+    const D = T.dcs.length;
+    T.dcs.forEach((dc, di) => {
+      if (!dc.N) return;
+      const k = dc.N * numTokens;
+      if (mode === 'random') {
+        dc.nodes.forEach(id => { for (let t = 0; t < numTokens; t++) toks.push({ pos: rng(), node: id }); });
+        return;
+      }
+      // Сбалансированное приближение: равномерные позиции, в каждом «раунде» ноды идут вперемешку по racks.
+      const order = [];
+      for (let t = 0; t < numTokens; t++) {
+        const lists = shuffle(dc.racks.map(r => shuffle(r.nodes.slice(), rng)), rng);
+        const maxLen = Math.max(...lists.map(l => l.length));
+        for (let i = 0; i < maxLen; i++) for (const l of lists) if (i < l.length) order.push(l[i]);
+      }
+      const off = (di + 0.5) / (D + 1);
+      for (let s = 0; s < k; s++) toks.push({ pos: (s + off) / k, node: order[s] });
+    });
+    toks.sort((a, b) => a.pos - b.pos);
+    const M = toks.length;
+    const tokNode = new Int32Array(M); const size = new Float64Array(M);
+    for (let i = 0; i < M; i++) {
+      tokNode[i] = toks[i].node;
+      const prev = toks[(i - 1 + M) % M].pos;
+      let s = toks[i].pos - prev; if (s <= 0) s += 1; if (M === 1) s = 1;
+      size[i] = s;
+    }
+    // Реплики каждого диапазона (prev, tok_i]: обход кольца, как в NTS.
+    const nodeDc = T.nodes.map(n => n.dc); const nodeRack = T.nodes.map(n => n.rack);
+    const repOff = new Int32Array(M + 1); const reps = [];
+    const rackSeen = new Int32Array(T.racks.length + 1).fill(-1);
+    const nodeSeen = new Int32Array(T.N).fill(-1);
+    const dcRfLeft = new Int32Array(D); const dcRepeats = new Int32Array(D);
+    for (let i = 0; i < M; i++) {
+      repOff[i] = reps.length;
+      let toFill = 0;
+      for (let d = 0; d < D; d++) {
+        const dc = T.dcs[d];
+        if (dc.rf <= 0 || dc.N <= 0) { dcRfLeft[d] = 0; continue; }
+        dcRfLeft[d] = Math.min(dc.rf, dc.N); dcRepeats[d] = dc.rf - dc.K; toFill++;
+      }
+      for (let step = 0, j = i; toFill > 0 && step < M; step++, j = (j + 1) % M) {
+        const ep = tokNode[j]; const d = nodeDc[ep];
+        if (dcRfLeft[d] <= 0) continue;
+        if (nodeSeen[ep] === i) continue;
+        const rk = nodeRack[ep];
+        if (rackSeen[rk] !== i) {
+          rackSeen[rk] = i; nodeSeen[ep] = i; reps.push(ep); dcRfLeft[d]--;
+          if (dcRfLeft[d] === 0) toFill--;
+          continue;
+        }
+        if (dcRepeats[d] <= 0) continue;
+        nodeSeen[ep] = i; reps.push(ep); dcRepeats[d]--; dcRfLeft[d]--;
+        if (dcRfLeft[d] === 0) toFill--;
+      }
+    }
+    repOff[M] = reps.length;
+    const rep = Int32Array.from(reps);
+    // владение: доля одной копии данных на каждой ноде
+    const own = new Float64Array(T.N);
+    for (let i = 0; i < M; i++) for (let p = repOff[i]; p < repOff[i + 1]; p++) own[rep[p]] += size[i];
+    // индекс нода -> диапазоны
+    const cnt = new Int32Array(T.N + 1);
+    for (let p = 0; p < rep.length; p++) cnt[rep[p] + 1]++;
+    for (let n = 0; n < T.N; n++) cnt[n + 1] += cnt[n];
+    const nodeRanges = new Int32Array(rep.length); const fill = cnt.slice(0, T.N);
+    for (let i = 0; i < M; i++) for (let p = repOff[i]; p < repOff[i + 1]; p++) nodeRanges[fill[rep[p]]++] = i;
+    return { M, size, rep, repOff, own, nodeRangeOff: cnt, nodeRanges, nodeDc, nodeRack, numTokens, mode, tokNode };
+  }
+
+  // Идеальная доля данных на ноду при сбалансированном распределении токенов (water-filling по racks).
+  function idealShares(dc) {
+    const R = Math.min(dc.rf, dc.N); const K = dc.K; const res = {};
+    if (R <= 0 || !dc.N) { dc.racks.forEach(r => { res[r.gidx] = 0; }); return res; }
+    const lo = r => (K < R ? 1 : 0);
+    const hi = r => (K < R ? Math.min(r.n, 1 + R - K) : Math.min(r.n, 1));
+    const f = s => sum(dc.racks.map(r => Math.min(hi(r), Math.max(lo(r), r.n * s))));
+    let a = 0, b = 1;
+    for (let it = 0; it < 80; it++) { const m = (a + b) / 2; if (f(m) < R) a = m; else b = m; }
+    dc.racks.forEach(r => { res[r.gidx] = Math.min(hi(r), Math.max(lo(r), r.n * b)) / r.n; });
+    return res;
+  }
+
+  // ---------- отказы racks и DC ----------
+  // maxLoss[d][t] - сколько реплик одного диапазона в DC d можно выбить отказом t racks этого DC (максимум по кольцу).
+  function rackLossTable(T, ring) {
+    const out = T.dcs.map(dc => new Int32Array(dc.K + 1));
+    const local = new Int32Array(T.racks.length);
+    for (let i = 0; i < ring.M; i++) {
+      const per = T.dcs.map(() => []);
+      const touched = [];
+      for (let p = ring.repOff[i]; p < ring.repOff[i + 1]; p++) {
+        const rk = ring.nodeRack[ring.rep[p]];
+        if (local[rk] === 0) touched.push(rk);
+        local[rk]++;
+      }
+      for (const rk of touched) { per[T.racks[rk].dc].push(local[rk]); local[rk] = 0; }
+      per.forEach((arr, d) => {
+        arr.sort((x, y) => y - x);
+        let s = 0; const tbl = out[d];
+        for (let t = 1; t <= T.dcs[d].K; t++) { if (t <= arr.length) s += arr[t - 1]; if (s > tbl[t]) tbl[t] = s; }
+      });
+    }
+    return out;
+  }
+  function rackTolerance(R, T, lossTbl, d) {
+    // максимум t: любые t racks в DC d могут отказать без нарушения требования (K - весь DC)
+    const dc = T.dcs[d];
+    const live = T.rf.slice();
+    let best = 0;
+    for (let t = 1; t <= dc.K; t++) {
+      live[d] = Math.max(0, T.rf[d] - lossTbl[d][t]);
+      const anyAlive = t < dc.K || T.N > dc.N;
+      if (!satisfied(R, live, anyAlive)) break;
+      best = t;
+    }
+    return best;
+  }
+  const LOSS_REQ = { cl: 'DATA', mins: [], g: 1, any: false, ok: true };
+  function lossReq(T) { return Object.assign({}, LOSS_REQ, { mins: new Array(T.dcs.length).fill(0) }); }
+
+  function dcFailure(T, reqs) {
+    // reqs(c) -> {w, r, s}
+    const rows = [];
+    T.dcs.forEach((fdc, f) => {
+      const live = T.rf.slice(); live[f] = 0;
+      const anyAlive = T.N > fdc.N;
+      const cells = T.dcs.map((cdc, c) => {
+        if (c === f) return null;
+        const q = reqs(c);
+        return { w: satisfied(q.w, live, anyAlive), r: satisfied(q.r, live, anyAlive), s: q.s ? satisfied(q.s, live, anyAlive) : null };
+      });
+      const dataSafe = T.rf.some((x, d) => d !== f && x > 0);
+      rows.push({ dc: f, cells, dataSafe });
+    });
+    return rows;
+  }
+
+  // ---------- оценка конкретного набора отказов ----------
+  function evalFailures(T, ring, failed, reqW, reqR, reqS) {
+    const D = T.dcs.length; const live = new Int32Array(D);
+    let anyAlive = false; for (let n = 0; n < T.N; n++) if (!failed[n]) { anyAlive = true; break; }
+    const res = { w: 0, r: 0, s: 0, loss: 0, wAny: false, rAny: false, sAny: false, lossAny: false };
+    for (let i = 0; i < ring.M; i++) {
+      let down = false;
+      for (let p = ring.repOff[i]; p < ring.repOff[i + 1]; p++) if (failed[ring.rep[p]]) { down = true; break; }
+      if (!down && anyAlive) continue;
+      live.fill(0); let tot = 0;
+      for (let p = ring.repOff[i]; p < ring.repOff[i + 1]; p++) { const n = ring.rep[p]; if (!failed[n]) { live[ring.nodeDc[n]]++; tot++; } }
+      const sz = ring.size[i];
+      if (!satisfied(reqW, live, anyAlive)) { res.w += sz; res.wAny = true; }
+      if (!satisfied(reqR, live, anyAlive)) { res.r += sz; res.rAny = true; }
+      if (reqS && !satisfied(reqS, live, anyAlive)) { res.s += sz; res.sAny = true; }
+      if (tot === 0) { res.loss += sz; res.lossAny = true; }
+    }
+    return res;
+  }
+
+  // ---------- вероятность при случайных отказах k нод ----------
+  function* combos(n, k) {
+    const c = Array.from({ length: k }, (_, i) => i);
+    while (true) {
+      yield c;
+      let i = k - 1; while (i >= 0 && c[i] === n - k + i) i--;
+      if (i < 0) return;
+      c[i]++; for (let j = i + 1; j < k; j++) c[j] = c[j - 1] + 1;
+    }
+  }
+  function makeProbTask(T, ring, reqW, reqR, reqS, opts) {
+    opts = opts || {};
+    const N = T.N;
+    const kMax = Math.min(N, opts.kMax || 10);
+    const budget = opts.budget || 2.5e7;
+    const avgRanges = ring.rep.length / Math.max(1, N);
+    const avgRep = ring.rep.length / Math.max(1, ring.M);
+    const D = T.dcs.length;
+    const rng = mulberry32(((opts.seed || 1) * 7919) >>> 0);
+    const ks = []; for (let k = 1; k <= kMax; k++) ks.push(k);
+    const results = [];
+    const visited = new Int32Array(ring.M).fill(-1);
+    const failed = new Uint8Array(N);
+    const live = new Int32Array(D);
+    const pool = Array.from({ length: N }, (_, i) => i);
+    let stamp = 0;
+    function trial(list) {
+      stamp++;
+      for (const n of list) failed[n] = 1;
+      const anyAlive = list.length < N;
+      let w = 0, r = 0, s = 0, l = 0;
+      for (const n of list) {
+        for (let q = ring.nodeRangeOff[n]; q < ring.nodeRangeOff[n + 1]; q++) {
+          const i = ring.nodeRanges[q];
+          if (visited[i] === stamp) continue; visited[i] = stamp;
+          live.fill(0); let tot = 0;
+          for (let p = ring.repOff[i]; p < ring.repOff[i + 1]; p++) { const x = ring.rep[p]; if (!failed[x]) { live[ring.nodeDc[x]]++; tot++; } }
+          const sz = ring.size[i];
+          if (!satisfied(reqW, live, anyAlive)) w += sz;
+          if (!satisfied(reqR, live, anyAlive)) r += sz;
+          if (reqS && !satisfied(reqS, live, anyAlive)) s += sz;
+          if (tot === 0) l += sz;
+        }
+      }
+      if (reqW.any && !anyAlive) w = 1;
+      for (const n of list) failed[n] = 0;
+      return [w, r, s, l];
+    }
+    let ki = 0;
+    return {
+      kMax,
+      done() { return ki >= ks.length; },
+      results,
+      step(timeBudgetMs) {
+        const t0 = Date.now();
+        while (ki < ks.length && (Date.now() - t0) < (timeBudgetMs || 1e9)) {
+          const k = ks[ki++];
+          const total = binom(N, k);
+          const perTrial = Math.max(1, k * avgRanges * avgRep);
+          const trials = Math.max(200, Math.min(4000, Math.floor(budget / ks.length / perTrial)));
+          const exact = total <= trials;
+          const acc = { k, exact, trials: 0, pW: 0, pR: 0, pS: 0, pL: 0, fW: 0, fR: 0, fS: 0, fL: 0, pBoth: 0 };
+          const add = res => {
+            acc.trials++;
+            if (res[0] > 1e-12) acc.pW++; if (res[1] > 1e-12) acc.pR++; if (res[2] > 1e-12) acc.pS++; if (res[3] > 1e-12) acc.pL++;
+            if (res[0] > 1e-12 || res[1] > 1e-12) acc.pBoth++;
+            acc.fW += res[0]; acc.fR += res[1]; acc.fS += res[2]; acc.fL += res[3];
+          };
+          if (exact) { for (const c of combos(N, k)) add(trial(c)); }
+          else {
+            for (let t = 0; t < trials; t++) {
+              for (let i = 0; i < k; i++) { const j = i + Math.floor(rng() * (N - i)); const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp; }
+              add(trial(pool.slice(0, k)));
+            }
+          }
+          ['pW', 'pR', 'pS', 'pL', 'fW', 'fR', 'fS', 'fL', 'pBoth'].forEach(key => { acc[key] /= acc.trials; });
+          results.push(acc);
+        }
+        return ki >= ks.length;
+      }
+    };
+  }
+
+  // ---------- нагрузка ----------
+  function readSpread(Rq, T, c) {
+    // сколько реплик опрашивается в каждом DC (координатор берёт ближайшие, т.е. сначала локальный DC)
+    const D = T.dcs.length; const per = new Array(D).fill(0);
+    if (!Rq.ok || Rq.any) return per;
+    for (let d = 0; d < D; d++) per[d] = Rq.mins[d];
+    let extra = Rq.g - sum(per);
+    if (extra > 0) { const addLocal = Math.min(extra, T.rf[c] - per[c]); per[c] += addLocal; extra -= addLocal; }
+    for (let d = 0; d < D && extra > 0; d++) { if (d === c) continue; const a = Math.min(extra, T.rf[d] - per[d]); per[d] += a; extra -= a; }
+    return per;
+  }
+
+  // ---------- полный расчёт ----------
+  function compute(st, opts) {
+    opts = opts || {};
+    const T = buildTopology(st);
+    const out = { T, st, errors: T.errors.slice(), warnings: [] };
+    if (out.errors.length) return out;
+    const D = T.dcs.length;
+    const c = Math.min(Math.max(0, st.clientDc | 0), D - 1);
+    out.c = c;
+    const W = requirement(st.wcl, c, T), R = requirement(st.rcl, c, T);
+    const S = st.lwt ? requirement(st.scl, c, T) : null;
+    out.W = W; out.R = R; out.S = S;
+    out.wTol = worstNodeTolerance(W, T); out.rTol = worstNodeTolerance(R, T);
+    out.sTol = S ? worstNodeTolerance(S, T) : null;
+    out.appTol = Math.min(out.wTol, out.rTol, S ? out.sTol : Infinity);
+    out.consistent = consistent(W, R, T);
+    out.ackLossTol = W.any ? 0 : Math.max(0, W.acks - 1);
+    out.replLossTol = T.totRf - 1;
+    // матрица консистентности: пишет клиент в DC a, читает клиент в DC b
+    out.consMatrix = T.dcs.map((_, a) => T.dcs.map((__, b) => consistent(requirement(st.wcl, a, T), requirement(st.rcl, b, T), T)));
+    // кольцо
+    const nt = TOKEN_CHOICES.includes(+st.numTokens) ? +st.numTokens : 16;
+    const ring = buildRing(T, nt, st.tokenMode === 'random' ? 'random' : 'balanced', st.seed || 1);
+    out.ring = ring;
+    // доли данных
+    out.shares = T.dcs.map(dc => {
+      const ideal = idealShares(dc);
+      const nodes = dc.nodes.map(id => ({ id, ideal: ideal[T.nodes[id].rack], sim: ring.own[id] }));
+      const iv = nodes.map(n => n.ideal), sv = nodes.map(n => n.sim);
+      return { dc: dc.idx, nodes, idealMin: Math.min(...iv), idealMax: Math.max(...iv), idealAvg: dc.N ? Math.min(dc.rf, dc.N) / dc.N : 0,
+        simMin: Math.min(...sv), simMax: Math.max(...sv), rackIdeal: dc.racks.map(r => ({ rack: r.gidx, n: r.n, share: ideal[r.gidx] })) };
+    });
+    // racks
+    const lossTbl = rackLossTable(T, ring);
+    out.rackLoss = lossTbl;
+    const L = lossReq(T);
+    out.rackTol = T.dcs.map((dc, d) => ({
+      dc: d, K: dc.K,
+      w: rackTolerance(W, T, lossTbl, d), r: rackTolerance(R, T, lossTbl, d),
+      s: S ? rackTolerance(S, T, lossTbl, d) : null, loss: rackTolerance(L, T, lossTbl, d),
+      maxPerRack: dc.K ? lossTbl[d][1] : 0
+    }));
+    out.dcFail = D > 1 ? dcFailure(T, cc => ({ w: requirement(st.wcl, cc, T), r: requirement(st.rcl, cc, T), s: S ? requirement(st.scl, cc, T) : null })) : [];
+    // операции
+    out.readPer = readSpread(R, T, c);
+    // нагрузка и данные
+    const dataGB = num(st.dataGB), wps = num(st.writesPs), rps = num(st.readsPs), rowB = num(st.rowBytes);
+    out.load = { dataGB, wps, rps, rowB };
+    out.remoteDcs = T.dcs.filter((d, i) => i !== c && d.rf > 0).length;
+    out.perDc = T.dcs.map((dc, d) => {
+      const sh = out.shares[d];
+      const localRead = out.readPer[d];
+      const readFactor = dc.rf > 0 ? localRead / Math.min(dc.rf, dc.N) : 0;
+      return {
+        dc: d,
+        gbAvg: dataGB != null ? dataGB * sh.idealAvg : null,
+        gbMax: dataGB != null ? dataGB * sh.idealMax : null,
+        gbTotal: dataGB != null ? dataGB * Math.min(dc.rf, dc.N) : null,
+        wAvg: wps != null ? wps * sh.idealAvg : null, wMax: wps != null ? wps * sh.idealMax : null,
+        rAvg: rps != null ? rps * sh.idealAvg * readFactor : null, rMax: rps != null ? rps * sh.idealMax * readFactor : null,
+        readReplicas: localRead
+      };
+    });
+    out.interDcMbps = (wps != null && rowB != null) ? wps * rowB * out.remoteDcs * 8 / 1e6 : null;
+    out.warnings = warnings(out);
+    return out;
+  }
+
+  // ---------- предупреждения ----------
+  function warnings(o) {
+    const T = o.T, st = o.st, list = [];
+    const add = (level, text) => list.push({ level, text });
+    const D = T.dcs.length; const c = o.c; const cname = T.dcs[c].name;
+    if (!o.W.ok) add('err', 'Запись с ' + st.wcl + ' невозможна даже при всех живых нодах: требуется больше реплик, чем есть' + (o.W.mins[c] > T.rf[c] ? ' в ' + cname : '') + '.');
+    if (!o.R.ok) add('err', 'Чтение с ' + st.rcl + ' невозможно даже при всех живых нодах: требуется больше реплик, чем есть' + (o.R.mins[c] > T.rf[c] ? ' в ' + cname : '') + '.');
+    if (o.S && !o.S.ok) add('err', 'LWT с ' + st.scl + ' невозможны даже при всех живых нодах.');
+    if (T.N === 1) add('info', 'Одна нода (standalone): отказ ноды останавливает и чтение, и запись. Защиту данных дают только бэкапы.');
+    T.dcs.forEach((dc, d) => {
+      if (dc.rf === 1 && dc.N > 1) add('warn', dc.name + ': RF=1. Отказ любой ноды делает часть данных недоступной, а отказ диска означает потерю этих данных без восстановления из реплик.');
+      if (dc.rf > 1 && dc.rf % 2 === 0 && /QUORUM|SERIAL/.test(st.wcl + st.rcl + (st.lwt ? st.scl : ''))) add('info', dc.name + ': RF=' + dc.rf + ' чётный. QUORUM от ' + dc.rf + ' равен ' + (Math.floor(dc.rf / 2) + 1) + ' и переносит столько же отказов, сколько RF=' + (dc.rf - 1) + ', но хранит лишнюю копию.');
+      if (dc.rf > 1 && dc.K > 1 && dc.K < dc.rf) add('warn', dc.name + ': racks (' + dc.K + ') меньше RF (' + dc.rf + '). NetworkTopologyStrategy кладёт в один rack до ' + Math.min(1 + dc.rf - dc.K, Math.max(...dc.racks.map(r => r.n))) + ' реплик одного диапазона, поэтому отказ rack выбивает несколько реплик сразу. Число racks лучше сделать равным RF или кратным ему.');
+      if (dc.rf > 1 && dc.K === 1 && dc.N > 1) add('info', dc.name + ': один rack. Размещение реплик не учитывает зоны отказа (стойки, питание, коммутаторы); переносится только отказ отдельных нод.');
+      const sh = o.shares[d];
+      if (dc.rf > 0 && sh.idealMin > 0 && sh.idealMax / sh.idealMin > 1.05) {
+        add('warn', dc.name + ': racks разного размера. При RF=' + dc.rf + ' и racks ' + dc.racks.map(r => r.n).join('/') + ' ноды хранят от ' + pct(sh.idealMin) + ' до ' + pct(sh.idealMax) + ' данных, самые загруженные ноды получают в ' + (sh.idealMax / sh.idealMin).toFixed(2).replace('.', ',') + ' раза больше записи, чтения и места на диске. Выравнивайте число нод в racks.');
+      }
+      if (dc.rf === 0 && D > 1) add('info', dc.name + ': RF=0, ноды DC не хранят данных keyspace «' + st.ks + '». DC не указывается в replication: в 5.0.9 явно указанный DC с RF 0 учитывается в EACH_QUORUM и делает его недоступным.');
+    });
+    if (T.dcs[c].rf === 0 && /LOCAL/.test(st.wcl + st.rcl + (st.lwt ? st.scl : ''))) add('err', 'Клиент работает в ' + cname + ', где RF=0: LOCAL_* consistency level в этом DC не выполняется.');
+    if (D > 1) {
+      const remote = [];
+      if (o.W.needsRemote) remote.push('запись (' + st.wcl + ')');
+      if (o.R.needsRemote) remote.push('чтение (' + st.rcl + ')');
+      if (o.S && o.S.needsRemote) remote.push('LWT (' + st.scl + ')');
+      if (remote.length) add('warn', remote.join(', ') + ': нужен ответ реплик из другого DC. Задержка операции будет не меньше RTT между DC, а обрыв связи между DC остановит эти операции.');
+      if (o.consistent && o.consMatrix.some((row, a) => row.some((v, b) => a !== b && v === false))) add('info', 'Консистентность гарантирована только внутри одного DC: клиент, читающий в другом DC, может получить устаревшие данные, пока репликация не дошла.');
+    }
+    if (st.wcl === 'ANY') add('warn', 'ANY: запись считается успешной, даже если сохранена только как hint на координаторе. Отказ координатора до доставки hint означает потерю записи, а прочитать такую запись нельзя ни на одном CL.');
+    if (o.W.ok && !o.W.any && o.W.acks === 1 && T.totRf > 1) add('warn', 'Запись с ' + st.wcl + ' подтверждается одной репликой. Если эта нода откажет до доставки hints остальным репликам, подтверждённая запись потеряна.');
+    if (o.consistent === false && o.W.ok && o.R.ok) add('info', 'Чтение и запись не перекрываются гарантированно (R + W ≤ RF): после записи чтение может вернуть старое значение до завершения репликации, read repair или repair.');
+    if (+st.numTokens === 1) add('info', 'num_tokens: 1. Каждой ноде нужен вручную рассчитанный initial_token, добавление нод требует перебалансировки. Зато случайный отказ нескольких нод реже задевает общий диапазон.');
+    if (+st.numTokens >= 64) add('warn', 'num_tokens: ' + st.numTokens + '. Чем больше vnodes, тем выше вероятность, что отказ двух-трёх случайных нод затронет общий диапазон, и тем дольше repair. Для 5.0 по умолчанию 16.');
+    if (st.lwt) add('info', 'LWT: в cassandra.yaml 5.0 по умолчанию paxos_variant v1, в cassandra_latest.yaml v2. Для нового кластера используйте v2, требования к числу живых реплик это не меняет.');
+    if (T.N > 1) add('info', 'Отказ ноды дольше max_hint_window (3h по умолчанию) требует nodetool repair после возвращения. Repair каждой таблицы выполняется чаще, чем gc_grace_seconds.');
+    return list;
+  }
+  function pct(x) { const v = x * 100; return (v >= 10 ? v.toFixed(0) : v.toFixed(1)).replace('.', ',') + '%'; }
+
+  // ---------- генерация конфигурации ----------
+  function configs(o) {
+    const T = o.T, st = o.st; const files = [];
+    const q = s => '"' + String(s).replace(/"/g, '""') + '"';
+    const ksName = /^[a-z_][a-z0-9_]*$/.test(st.ks) ? st.ks : q(st.ks);
+    const repl = T.dcs.filter(d => d.rf > 0).map(d => "'" + d.name + "': " + d.rf).join(', ');
+    const sysRepl = (cap) => T.dcs.map(d => "'" + d.name + "': " + Math.min(d.N, cap)).join(', ');
+    let cql = '-- Keyspace данных\n';
+    cql += 'CREATE KEYSPACE IF NOT EXISTS ' + ksName + '\n  WITH replication = {\'class\': \'NetworkTopologyStrategy\', ' + repl + '}\n  AND durable_writes = true;\n\n';
+    cql += '-- Для существующего keyspace\n-- ALTER KEYSPACE ' + ksName + ' WITH replication = {\'class\': \'NetworkTopologyStrategy\', ' + repl + '};\n';
+    cql += '-- После ALTER с изменением RF: nodetool repair -full ' + st.ks + ' на каждой ноде по очереди.\n\n';
+    cql += '-- Системные keyspace: по умолчанию SimpleStrategy (system_auth RF=1, system_distributed RF=3, system_traces RF=2).\n';
+    cql += '-- system_auth нужен в каждом DC, иначе вход не работает при отказе ноды или потере связи между DC.\n';
+    cql += 'ALTER KEYSPACE system_auth WITH replication = {\'class\': \'NetworkTopologyStrategy\', ' + sysRepl(3) + '};\n';
+    cql += 'ALTER KEYSPACE system_distributed WITH replication = {\'class\': \'NetworkTopologyStrategy\', ' + sysRepl(3) + '};\n';
+    cql += 'ALTER KEYSPACE system_traces WITH replication = {\'class\': \'NetworkTopologyStrategy\', ' + sysRepl(2) + '};\n';
+    cql += '-- Затем на каждой ноде: nodetool repair -full system_auth\n';
+    files.push({ name: 'schema.cql', lang: 'cql', title: 'cqlsh', content: cql });
+
+    const seeds = [];
+    T.dcs.forEach(dc => {
+      const own = [];
+      for (const r of dc.racks) { if (own.length >= 3) break; own.push('<IP ' + T.nodes[r.nodes[0]].name + '>'); }
+      if (own.length < Math.min(2, dc.N)) own.push('<IP ' + T.nodes[dc.nodes[1]].name + '>');
+      seeds.push(...own);
+    });
+    T.dcs.forEach(dc => {
+      let y = '# Фрагмент cassandra.yaml для нод ' + dc.name + ' (за основу взят conf/cassandra_latest.yaml 5.0.9)\n';
+      y += "cluster_name: '" + st.cluster.replace(/'/g, "''") + "'\n";
+      y += 'endpoint_snitch: GossipingPropertyFileSnitch\n';
+      y += 'num_tokens: ' + o.ring.numTokens + '\n';
+      if (o.ring.numTokens > 1) y += '# Алгоритм выдачи токенов под RF локального DC (только при первом запуске ноды)\nallocate_tokens_for_local_replication_factor: ' + Math.max(1, Math.min(dc.rf || 3, dc.N)) + '\n';
+      else y += '# num_tokens: 1 - задайте initial_token каждой ноде вручную, токены нод DC равномерно по кольцу\n# initial_token: <токен ноды>\n';
+      y += 'seed_provider:\n  - class_name: org.apache.cassandra.locator.SimpleSeedProvider\n    parameters:\n      # 2-3 seed из каждого DC, по одному из разных racks; одинаковый список на всех нодах кластера\n      - seeds: "' + seeds.join(',') + '"\n';
+      y += 'hinted_handoff_enabled: true\nmax_hint_window: 3h\n';
+      y += 'internode_compression: dc\n';
+      if (st.lwt) y += 'paxos_variant: v2\n';
+      files.push({ name: 'cassandra.yaml — ' + dc.name, lang: 'yaml', title: 'cassandra.yaml', content: y });
+    });
+
+    let rk = '# cassandra-rackdc.properties: свой файл на каждой ноде, ниже содержимое по нодам\n';
+    T.dcs.forEach(dc => {
+      dc.racks.forEach(r => {
+        r.nodes.forEach(id => { rk += '\n# ' + T.nodes[id].name + '\ndc=' + dc.name + '\nrack=' + r.name + '\n'; });
+      });
+    });
+    files.push({ name: 'cassandra-rackdc.properties', lang: 'properties', title: 'cassandra-rackdc.properties', content: rk });
+
+    const cdc = T.dcs[o.c].name;
+    let drv = '# application.conf, Apache Cassandra Java Driver 4.x (DataStax Java Driver 4.x)\n';
+    drv += 'datastax-java-driver {\n';
+    drv += '  basic.load-balancing-policy.local-datacenter = "' + cdc + '"\n';
+    drv += '  basic.request.consistency = ' + st.rcl + '\n';
+    drv += '  basic.request.serial-consistency = ' + (st.lwt ? st.scl : 'LOCAL_SERIAL') + '\n';
+    drv += '  profiles {\n    write { basic.request.consistency = ' + st.wcl + ' }\n    read  { basic.request.consistency = ' + st.rcl + ' }\n  }\n}\n';
+    drv += '# Профиль выбирается в запросе: statement.setExecutionProfileName("write").\n';
+    drv += '# Драйвер 4.x не переключается на другой DC при отказе локального: это решается на уровне приложения.\n';
+    files.push({ name: 'application.conf (драйвер)', lang: 'hocon', title: 'application.conf', content: drv });
+
+    let chk = '# Проверка после развёртывания\n';
+    chk += 'nodetool status ' + st.ks + '        # колонка "Owns (effective)": доля данных ноды с учётом RF\n';
+    chk += 'nodetool describecluster              # одна версия схемы, имена DC\n';
+    chk += 'nodetool getendpoints ' + st.ks + ' <таблица> <ключ>   # на каких нодах лежат реплики ключа\n';
+    chk += "cqlsh -e \"SELECT keyspace_name, replication FROM system_schema.keyspaces;\"\n";
+    files.push({ name: 'Проверка', lang: 'bash', title: 'shell', content: chk });
+    return files;
+  }
+
+  const API = { CL_LIST, WRITE_CL, READ_CL, SERIAL_CL, TOKEN_CHOICES, LIMITS, defaultState, buildTopology, requirement, satisfied,
+    worstNodeTolerance, consistent, buildRing, idealShares, rackLossTable, rackTolerance, evalFailures, makeProbTask, compute, configs, pct, binom, readSpread, dcFailure };
+  if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.CCalc = API;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* Калькулятор TSDB Cassandra 2.0: движок сайзинга.
+ * Размер строки и LZ4: CSize (size.js). Реплики, racks, CL: CCalc (ft.js, NetworkTopologyStrategy 5.0.9).
+ * Чистые функции, без DOM. Работает в браузере (window.CEngine) и в Node. */
+(function (root) {
+  'use strict';
+  const SZ = root.CSize || require('../build/size.built.js');
+  const FT = root.CCalc || require('./ft.js');
+
+  const APP_VERSION = '2.0.1';
+  const CASSANDRA_VERSION = '5.0.9';
+  const TYPE_ORDER = SZ.TYPE_ORDER;
+  const TYPE_COL = { DOUBLE: 'double_value', FLOAT: 'float_value', LONG: 'long_value', DATETIME: 'long_value', SET: 'long_value', STRING: 'string_value' };
+
+  const PROFILES = [
+    { id: 'p8', c: 8, ram: 32 }, { id: 'p16', c: 16, ram: 64 }, { id: 'p32', c: 32, ram: 128 }, { id: 'p64', c: 64, ram: 256 }
+  ];
+  const DRIVES = { nvme: [0.96, 1.92, 3.84, 7.68, 15.36], ssd: [0.48, 0.96, 1.92, 3.84, 7.68], hdd: [1, 2, 4, 8, 12, 16] };
+  const DISK = {
+    nvme: { label: 'NVMe', iops: 300000, lat: 0.15, mbs: 2000 },
+    ssd: { label: 'SATA SSD', iops: 50000, lat: 0.4, mbs: 450 },
+    hdd: { label: 'HDD', iops: 150, lat: 9, mbs: 180 }
+  };
+  const RAIDS = {
+    none: { label: 'Без RAID', eff: n => n }, raid0: { label: 'RAID 0', eff: n => n }, jbod: { label: 'JBOD', eff: n => n },
+    raid1: { label: 'RAID 1', eff: n => n / 2 }, raid10: { label: 'RAID 10', eff: n => n / 2 },
+    raid5: { label: 'RAID 5', eff: n => n - 1 }, raid6: { label: 'RAID 6', eff: n => n - 2 }
+  };
+  // Профиль работы одного пользователя MES
+  const USAGE = {
+    light:   { label: 'Редкие обращения', trOpen: 2, trTags: 8, trWin: 8, trRef: 10, mnTags: 30, mnRef: 5, repH: 0.25, repTags: 20, repDays: 1 },
+    typical: { label: 'Типовой', trOpen: 6, trTags: 10, trWin: 8, trRef: 5, mnTags: 50, mnRef: 2, repH: 1, repTags: 50, repDays: 1 },
+    heavy:   { label: 'Активная аналитика', trOpen: 12, trTags: 20, trWin: 24, trRef: 2, mnTags: 100, mnRef: 1, repH: 3, repTags: 100, repDays: 7 }
+  };
+  // Параметры модели: оценки, уточняются нагрузочным тестом
+  const M = {
+    wpc: 4000, qpc: 1500, rpc: 150000, util: 0.6, page: 5000,
+    keyLen: 20, sstAux: 40, auxPct: 0.002, hintWindowSec: 10800, fsReserve: 0.05, maxFill: 0.80, mutOverhead: 60
+  };
+  const G = (type, count, period) => ({ type, count, period });
+  const PRESETS = {
+    tz:      { label: '5000 × 1 с + 2000 × 10 с', groups: [G('DOUBLE', 5000, 1), G('DOUBLE', 2000, 10)] },
+    shop:    { label: 'Цех, ~3 000 тегов', groups: [G('DOUBLE', 800, 1), G('DOUBLE', 1200, 10), G('FLOAT', 300, 5), G('LONG', 200, 10), G('DATETIME', 50, 60), G('SET', 400, 5), G('STRING', 50, 60)] },
+    plant:   { label: 'Завод, ~25 000 тегов', groups: [G('DOUBLE', 4000, 1), G('DOUBLE', 9000, 10), G('FLOAT', 3000, 5), G('LONG', 2500, 5), G('DATETIME', 500, 60), G('SET', 5000, 2), G('STRING', 600, 60)] },
+    holding: { label: 'Площадка холдинга, ~120 000 тегов', groups: [G('DOUBLE', 20000, 1), G('DOUBLE', 60000, 10), G('FLOAT', 10000, 5), G('LONG', 10000, 10), G('DATETIME', 2000, 60), G('SET', 15000, 5), G('STRING', 3000, 60)] }
+  };
+
+  function defaultState() {
+    return {
+      v: 2, mode: 'cluster', hw: 'recommend',
+      groups: [G('DOUBLE', 5000, 1), G('DOUBLE', 2000, 10), G('FLOAT', 1000, 5), G('LONG', 1000, 5), G('DATETIME', 200, 60), G('SET', 2000, 2), G('STRING', 300, 60)],
+      strLen: 32, strEnc: 'mix', annPct: 1, annLen: 64, annEnc: 'cyr',
+      retention: 365, growth: 10, years: 3, comp: 'lz4',
+      cleanup: 'delete', cleanInt: 7, backups: 'on_nocleanup', backInt: 7,
+      dc: 1, F: 1, cons: 'strong',
+      manual: false, rfs: [3, 3, 3, 3, 3], wcl: 'LOCAL_QUORUM', rcl: 'LOCAL_QUORUM', lwt: false, scl: 'LOCAL_SERIAL',
+      rackPolicy: 'rf', numTokens: 16, tokenMode: 'balanced', seed: 1, topo: null,
+      users: 30, usage: 'typical',
+      trOpen: 6, trTags: 10, trWin: 8, trRef: 5, mnTags: 50, mnRef: 2, repH: 1, repTags: 50, repDays: 1,
+      rpo: 10, rto: 4, slaW: 20, slaR: 100,
+      disk: 'nvme', raid: 'raid0', drive: 'auto', maxNodeTB: 4, netIn: 10, rttIn: 0.3, netDc: 1, rttDc: 20,
+      ownCores: 16, ownRam: 64, ownDrives: 2, ownDrive: 3.84,
+      snapPer: true, peak: 2, partMs: 1950000000, backfill: 30,
+      calib: { on: false, spaceGiB: '', nodes: '', rf: '', days: '', pps: '', ratio: '' },
+      profileOverride: null
+    };
+  }
+
+  /* ---------- утилиты ---------- */
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  function num(x, d) { const v = typeof x === 'string' ? parseFloat(x.replace(',', '.')) : Number(x); return Number.isFinite(v) ? v : d; }
+  const ceilTo = (x, k) => Math.ceil(x / k) * k;
+  function heapFor(ram) { if (ram <= 24) return Math.max(4, Math.floor(ram / 4)); if (ram <= 40) return 8; if (ram <= 80) return 16; if (ram <= 160) return 24; return 31; }
+  function pickSmall(needTB, list) { for (const g of list) if (g >= needTB) return g; return list[list.length - 1]; }
+  function drivesFor(reqTB, raid, size) {
+    switch (raid) {
+      case 'none': return reqTB <= size ? 1 : null;
+      case 'raid0': case 'jbod': return Math.max(1, Math.ceil(reqTB / size));
+      case 'raid1': return reqTB <= size ? 2 : null;
+      case 'raid10': return Math.max(4, 2 * Math.ceil(reqTB / size));
+      case 'raid5': return Math.max(3, Math.ceil(reqTB / size) + 1);
+      case 'raid6': return Math.max(4, Math.ceil(reqTB / size) + 2);
+    }
+    return null;
+  }
+  function pickDrives(reqTB, disk, raid, sizeSel) {
+    const sizes = sizeSel === 'auto' ? DRIVES[disk] : [num(sizeSel, 3.84)];
+    let best = null;
+    for (const sz of sizes) {
+      const n = drivesFor(reqTB, raid, sz);
+      if (n == null) continue;
+      const cand = { n, size: sz, raw: n * sz, usable: RAIDS[raid].eff(n) * sz };
+      if (sizeSel !== 'auto') { best = cand; break; }
+      if (n > 8) continue;
+      cand.score = cand.raw + 0.5 * n;
+      if (!best || cand.score < best.score - 1e-9) best = cand;
+    }
+    if (!best && sizeSel === 'auto') {
+      const sz = sizes[sizes.length - 1], n = drivesFor(reqTB, raid, sz);
+      if (n != null) best = { n, size: sz, raw: n * sz, usable: RAIDS[raid].eff(n) * sz };
+    }
+    return best || { n: null, size: sizes[sizes.length - 1], raw: 0, usable: 0, impossible: true };
+  }
+
+  /* ---------- репликация ---------- */
+  function resolveRep(s) {
+    if (s.mode === 'standalone') return { standalone: true, dcs: [{ name: 'DC1', rf: 1 }], wcl: 'ONE', rcl: 'ONE', lwt: false, scl: 'SERIAL', F: 0, auto: true };
+    const D = clamp(Math.round(num(s.dc, 1)), 1, 5);
+    const F = clamp(Math.round(num(s.F, 1)), 0, 3);
+    if (s.manual) {
+      const rfs = Array.from({ length: D }, (_, i) => clamp(Math.round(num((s.rfs || [])[i], 3)), i === 0 ? 1 : 0, 9));
+      return { dcs: rfs.map((rf, i) => ({ name: 'DC' + (i + 1), rf })), wcl: s.wcl, rcl: s.rcl, lwt: !!s.lwt, scl: s.scl || 'LOCAL_SERIAL', F, auto: false };
+    }
+    const strong = s.cons !== 'eventual';
+    const rf = Math.max(1, strong ? 2 * F + 1 : F + 1);
+    return { dcs: Array.from({ length: D }, (_, i) => ({ name: 'DC' + (i + 1), rf })), wcl: strong ? 'LOCAL_QUORUM' : 'LOCAL_ONE', rcl: strong ? 'LOCAL_QUORUM' : 'LOCAL_ONE', lwt: !!s.lwt, scl: 'LOCAL_SERIAL', F, auto: true };
+  }
+  function racksFor(rf, N, policy) { return rf >= 2 && policy !== 'one' ? Math.min(rf, N) : 1; }
+  function spread(N, K) { return Array.from({ length: K }, (_, i) => Math.floor(N / K) + (i < N % K ? 1 : 0)); }
+  function ftState(R, topo) {
+    const s = R.s, rep = R.rep;
+    return {
+      cluster: 'MES_TSDB', ks: 'TSDB', dcs: topo.map((t, i) => ({ name: rep.dcs[i].name, rf: rep.dcs[i].rf, racks: t.racks.slice() })),
+      wcl: rep.wcl, rcl: rep.rcl, clientDc: 0, lwt: rep.lwt, scl: rep.scl,
+      numTokens: num(s.numTokens, 16), tokenMode: s.tokenMode || 'balanced', seed: num(s.seed, 1), dataGB: '', writesPs: '', readsPs: '', rowBytes: ''
+    };
+  }
+
+  /* ---------- чтение ---------- */
+  function usageParams(s) { return s.usage === 'custom' ? s : USAGE[s.usage] || USAGE.typical; }
+  function readModel(s, ratePerTag) {
+    const u = usageParams(s);
+    const U = Math.max(0, num(s.users, 0)), page = M.page;
+    const rowsWin = num(u.trWin, 8) * 3600 * ratePerTag;
+    const pagesWin = Math.max(1, Math.ceil(rowsWin / page));
+    const trRef = Math.max(1, num(u.trRef, 5)), mnRef = Math.max(0.5, num(u.mnRef, 2));
+    const rowsRef = Math.max(1, trRef * ratePerTag);
+    const rowsRep = num(u.repDays, 1) * 86400 * ratePerTag;
+    const pagesRep = Math.max(1, Math.ceil(rowsRep / page));
+    const trTags = num(u.trTags, 10), mnTags = num(u.mnTags, 0), repTags = num(u.repTags, 0);
+    const q = { open: U * num(u.trOpen, 0) / 3600 * trTags * pagesWin, ref: U * trTags / trRef, mn: U * mnTags / mnRef, rep: U * num(u.repH, 0) / 3600 * repTags * pagesRep };
+    q.total = q.open + q.ref + q.mn + q.rep; q.tsdb = q.open + q.ref + q.rep;
+    const rows = { open: U * num(u.trOpen, 0) / 3600 * trTags * rowsWin, ref: q.ref * rowsRef, mn: q.mn, rep: U * num(u.repH, 0) / 3600 * repTags * rowsRep };
+    rows.total = rows.open + rows.ref + rows.mn + rows.rep;
+    return { U, page, rowsWin, pagesWin, rowsRep, q, rows, u };
+  }
+
+  /* ---------- калибровка по nodetool tablestats ---------- */
+  function parseTablestats(text) {
+    const out = {};
+    if (!text) return out;
+    const unit = { bytes: 1, KiB: 1024, MiB: 1048576, GiB: 1073741824, TiB: 1099511627776, KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12 };
+    const m1 = /Space used \(live\):\s*([\d.,]+)\s*([KMGT]i?B|bytes)?/i.exec(text);
+    if (m1) { const v = parseFloat(m1[1].replace(',', '.')); const u = m1[2] || 'bytes'; out.spaceGiB = v * (unit[u] || 1) / 1073741824; }
+    const m2 = /SSTable Compression Ratio:\s*([\d.,]+)/i.exec(text);
+    if (m2) out.ratio = parseFloat(m2[1].replace(',', '.'));
+    const m3 = /Number of partitions \(estimate\):\s*(\d+)/i.exec(text);
+    if (m3) out.partitions = +m3[1];
+    return out;
+  }
+
+  /* ---------- основной расчёт ---------- */
+  function compute(sIn) {
+    const s = Object.assign(defaultState(), sIn || {});
+    s.calib = Object.assign(defaultState().calib, (sIn && sIn.calib) || {});
+    const rep = resolveRep(s);
+    const standalone = !!rep.standalone;
+    const F = standalone ? 0 : rep.F;
+
+    const groups = [];
+    let P = 0, tags = 0, minPer = Infinity;
+    const byType = {};
+    for (const g of (s.groups || [])) {
+      const cnt = num(g.count, 0), per = num(g.period, 0);
+      if (!(cnt > 0 && per > 0) || !SZ.TYPES[g.type]) continue;
+      const pps = cnt / per;
+      groups.push({ type: g.type, count: cnt, period: per, pps });
+      P += pps; tags += cnt; minPer = Math.min(minPer, per);
+      const t = byType[g.type] || (byType[g.type] = { tags: 0, pps: 0 });
+      t.tags += cnt; t.pps += pps;
+    }
+    if (P <= 0) return { empty: true, s, rep };
+
+    const ret = Math.max(1, num(s.retention, 365));
+    const g = Math.max(0, num(s.growth, 0)) / 100, Y = clamp(num(s.years, 0), 0, 15);
+    const Gf = Math.pow(1 + g, Y);
+    const Gavg = (g > 0 && Y > 0) ? (Gf - 1) / (Y * Math.log(1 + g)) : 1;
+    const horizonDays = Math.max(Y * 365, ret);
+    const peak = Math.max(1, num(s.peak, 2));
+    const mutFactor = 1 + (s.snapPer ? 1 : 0);
+    const mutAvg = P * mutFactor * Gf, mutPeak = mutAvg * peak;
+    const ratePerTag = P / tags;
+    const strBytes = Math.round(num(s.strLen, 32) * SZ.BPC[s.strEnc || 'mix']);
+    const annBytes = Math.round(num(s.annLen, 0) * SZ.BPC[s.annEnc || 'cyr']);
+    const annPct = clamp(num(s.annPct, 0), 0, 100) / 100;
+    const Wrec = clamp(Math.ceil(ret / 30), 1, 30);
+    const ttlSec = Math.min(Math.round(ret * 86400), 630720000);
+    const reads = readModel(s, ratePerTag * Gf);
+
+    const o = { s, rep, standalone, F, groups, P, tags, byType, minPer, ret, g, Y, Gf, Gavg, horizonDays, peak, mutFactor, mutAvg, mutPeak,
+      ratePerTag, strBytes, annBytes, annPct, Wrec, ttlSec, reads, partSec: Math.max(1, num(s.partMs, 1950000000) / 1000) };
+
+    // Топология по умолчанию для оценки CL (RF и CL от числа нод не зависят)
+    const T0 = FT.buildTopology({ dcs: rep.dcs.map(d => ({ name: d.name, rf: d.rf, racks: [Math.max(d.rf, 1)] })) });
+    o.req = { W: FT.requirement(rep.wcl, 0, T0), R: FT.requirement(rep.rcl, 0, T0), S: rep.lwt ? FT.requirement(rep.scl, 0, T0) : null };
+    o.tol = { w: FT.worstNodeTolerance(o.req.W, T0), r: FT.worstNodeTolerance(o.req.R, T0), s: o.req.S ? FT.worstNodeTolerance(o.req.S, T0) : null };
+    o.consistent = FT.consistent(o.req.W, o.req.R, T0);
+    o.rLocal = rep.dcs.map((d, i) => { const Rq = FT.requirement(rep.rcl, i, T0); const per = FT.readSpread(Rq, T0, i); return Math.max(1, per[i] || 0); });
+
+    // калибровка
+    o.calib = calibration(o);
+
+    const defs = {
+      cur:   { key: 'cur', name: 'Текущая схема', short: 'Текущая', ttl: false, unset: false, W: 1, gcSec: 86400, cleanup: s.cleanup, backups: s.backups, autoSnapTruncate: s.cleanup === 'truncate' },
+      rec:   { key: 'rec', name: 'Рекомендации', short: 'Рекомендации', ttl: true, unset: false, W: Wrec, gcSec: standalone ? 3600 : 10800, cleanup: 'ttl', backups: s.backups === 'on_cleanup' ? 'on_cleanup' : 'off', autoSnapTruncate: false },
+      unset: { key: 'unset', name: 'Рекомендации + доработка драйвера', short: '+ доработка драйвера', ttl: true, unset: true, W: Wrec, gcSec: standalone ? 3600 : 10800, cleanup: 'ttl', backups: s.backups === 'on_cleanup' ? 'on_cleanup' : 'off', autoSnapTruncate: false }
+    };
+    o.variants = {};
+    for (const k of ['cur', 'rec', 'unset']) o.variants[k] = sizeVariant(o, defs[k]);
+    o.checks = buildChecks(o);
+    return o;
+  }
+
+  function pointParams(o, gr, v) {
+    return { type: gr.type, period: gr.period, strBytes: gr.type === 'STRING' ? o.strBytes : 0, annPct: o.annPct, annBytes: o.annBytes, windowDays: v.W, ttlSec: o.ttlSec };
+  }
+  function dayBytes(o, v, comp, k) {
+    let data = 0, raw = 0, tomb = 0;
+    const variant = v.key;
+    for (const gr of o.groups) {
+      const pb = SZ.pointBytes(pointParams(o, gr, v), variant, comp);
+      data += gr.pps * 86400 * pb.disk; raw += gr.pps * 86400 * pb.raw;
+      tomb += gr.pps * (v.unset ? 0 : 5);
+    }
+    data *= k;
+    const part = o.tags * (SZ.partitionBytes(M.keyLen) + M.sstAux) / v.W; // на тег в каждом SSTable окна
+    return { day: data * (1 + M.auxPct) + part, data, raw, tombPerRow: tomb / o.P };
+  }
+
+  function calibration(o) {
+    const c = o.s.calib || {};
+    const space = num(c.spaceGiB, 0), nodes = num(c.nodes, 0), rf = num(c.rf, 0), days = num(c.days, 0);
+    const pps = num(c.pps, 0) || o.P, ratio = num(c.ratio, 0);
+    const res = { valid: false, on: !!c.on, k: 1, kRaw: 1, pps };
+    if (!(space > 0 && nodes > 0 && rf > 0 && days > 0)) return res;
+    const measured = space * 1073741824 * nodes / rf / (pps * days * 86400);
+    const cur = { key: 'cur', ttl: false, unset: false, W: 1 };
+    const model = dayBytes(o, cur, 'lz4', 1).day / (o.P * 86400);
+    const modelRaw = dayBytes(o, cur, 'none', 1).day / (o.P * 86400);
+    res.valid = true; res.measured = measured; res.model = model; res.dev = measured / model - 1;
+    res.k = measured / model;
+    if (ratio > 0 && ratio < 1.5) { res.ratio = ratio; res.measuredRaw = measured / ratio; res.kRaw = res.measuredRaw / modelRaw; res.modelRaw = modelRaw; }
+    res.suspicious = res.k > 2 || res.k < 0.5;
+    return res;
+  }
+
+  function sizeVariant(o, v) {
+    const s = o.s;
+    const useK = o.calib.valid && o.calib.on;
+    const k = useK ? o.calib.k : 1, kRaw = useK ? o.calib.kRaw : 1;
+    const lz4 = dayBytes(o, v, 'lz4', k), none = dayBytes(o, v, 'none', kRaw);
+    const comp = s.comp === 'none' ? 'none' : 'lz4';
+    const D = comp === 'lz4' ? lz4 : none;
+    const compDay = D.day;
+    const avgRaw = lz4.raw / (o.P * 86400);
+    // объём одной копии на горизонте
+    const cleanInt = Math.max(1, num(s.cleanInt, 7));
+    let L, Lnote;
+    if (v.cleanup === 'ttl') { L = compDay * o.Gf * (o.ret + v.W + v.gcSec / 86400); Lnote = 'TTL: срок хранения + окно TWCS + gc_grace_seconds'; }
+    else if (v.cleanup === 'delete') { L = compDay * o.Gavg * o.horizonDays; Lnote = 'DELETE при TWCS не освобождает место: данные копятся весь горизонт'; }
+    else if (v.cleanup === 'delete_gc') { L = compDay * o.Gf * (o.ret + cleanInt) * 1.02; Lnote = 'DELETE + nodetool garbagecollect: срок хранения + интервал очистки'; }
+    else { L = compDay * o.Gf * (o.ret + cleanInt); Lnote = 'TRUNCATE: срок хранения + интервал очистки'; }
+    let B = 0;
+    if (v.backups === 'on_nocleanup') B = compDay * o.Gavg * o.horizonDays;
+    else if (v.backups === 'on_cleanup') B = compDay * o.Gf * Math.max(1, num(s.backInt, 7));
+    const rowDisk = compDay / (o.P * 86400);
+    const snapT = o.tags * o.Gf * (rowDisk * 2 + 60); // snapshots: строка на тег, перезаписи до compaction
+    // объём с другой настройкой сжатия: для сравнения
+    const alt = comp === 'lz4' ? none.day : lz4.day;
+    const ctx = { v, lz4, none, comp, compDay, alt, avgRaw, rowDisk, rawPerPoint: avgRaw, bytesPerPoint: rowDisk, tombPerRow: lz4.tombPerRow, L, Lnote, B, snapT };
+    ctx.tf = 1 + 0.15 * ctx.tombPerRow;
+
+    // нагрузка по ДЦ (каждый ДЦ рассчитан на полную нагрузку: зеркальное резервирование)
+    ctx.dcLoad = o.rep.dcs.map((d, i) => {
+      const writeCores = o.mutPeak * d.rf / M.wpc;
+      const readCores = d.rf > 0 ? o.reads.q.total * o.rLocal[i] / M.qpc + o.reads.rows.total * o.rLocal[i] * ctx.tf / M.rpc : 0;
+      return { writeCores, readCores, coresNeed: (writeCores + readCores) / M.util };
+    });
+
+    const own = s.hw === 'own';
+    const profiles = own ? [{ id: 'own', c: Math.max(1, num(s.ownCores, 16)), ram: Math.max(4, num(s.ownRam, 64)), own: true }] : PROFILES;
+    ctx.cands = profiles.map(p => sizeProfile(o, v, ctx, p));
+    const fit = ctx.cands.filter(c => c.fits);
+    const ov = s.profileOverride && ctx.cands.find(c => c.p.id === s.profileOverride);
+    ctx.chosen = ov || (fit.length ? fit.reduce((a, b) => (b.cost < a.cost - 1e-9 ? b : a)) : ctx.cands[ctx.cands.length - 1]);
+    ctx.own = own;
+    ctx.dcs = ctx.chosen.dcs;
+    ctx.node = ctx.dcs[0].node;
+    ctx.N = ctx.dcs[0].N;
+    ctx.Ntotal = ctx.dcs.reduce((a, d) => a + d.N, 0);
+    ctx.topo = ctx.dcs.map(d => ({ racks: d.racks.slice() }));
+    return ctx;
+  }
+
+  function manualTopo(o) {
+    const t = o.s.topo;
+    if (!Array.isArray(t) || t.length !== o.rep.dcs.length) return null;
+    if (!t.every(d => Array.isArray(d.racks) && d.racks.length && d.racks.every(n => num(n, 0) >= 1))) return null;
+    return t.map(d => ({ racks: d.racks.map(n => Math.round(num(n, 1))) }));
+  }
+
+  function sizeProfile(o, v, ctx, p) {
+    const s = o.s, F = o.F;
+    const maxNodeBytes = Math.max(0.5, num(s.maxNodeTB, 4)) * 1e12;
+    const man = o.standalone ? null : manualTopo(o);
+    let manShares = null;
+    if (man) {
+      const T = FT.buildTopology({ dcs: man.map((t, i) => ({ name: o.rep.dcs[i].name, rf: o.rep.dcs[i].rf, racks: t.racks })) });
+      manShares = T.dcs.map(dc => { const sh = FT.idealShares(dc); return Math.max(0, ...dc.racks.map(r => sh[r.gidx])); });
+    }
+    const dcs = o.rep.dcs.map((d, i) => {
+      const rf = d.rf, load = ctx.dcLoad[i];
+      const LDC = (ctx.L + ctx.snapT) * rf;
+      if (o.standalone) {
+        const node = nodeDetail(o, v, ctx, p, 1, 1, i);
+        return { N: 1, racks: [1], K: 1, node, limits: [], need: 1 };
+      }
+      const Nrf = Math.max(rf, 3), Ndisk = Math.ceil(LDC / maxNodeBytes), Ncpu = Math.ceil(load.coresNeed / p.c) + F;
+      let need = Math.max(Nrf, Ndisk, Ncpu);
+      const limits = [];
+      if (need === Nrf) limits.push('RF'); if (need === Ndisk && Ndisk > 0) limits.push('объём на ноду'); if (need === Ncpu) limits.push('CPU');
+      if (man) {
+        const N = man[i].racks.reduce((a, b) => a + b, 0);
+        const share = rf > 0 ? manShares[i] : 0;
+        const node = nodeDetail(o, v, ctx, p, N, share, i);
+        let needRam = need;
+        // сколько нод нужно с учётом RAM при сбалансированных racks
+        for (let n = need, guard = 0; guard < 2000; n++, guard++) { if (nodeDetail(o, v, ctx, p, n, rf / n, i).ram.fits) { needRam = n; break; } }
+        return { N, racks: man[i].racks.slice(), K: man[i].racks.length, node, limits, need: Math.max(need, needRam), manual: true };
+      }
+      const K0 = racksFor(rf, need, s.rackPolicy);
+      let N = ceilTo(need, K0);
+      let node = nodeDetail(o, v, ctx, p, N, rf > 0 ? rf / N : 0, i);
+      let guard = 0;
+      while (guard++ < 2000 && (!node.ram.fits || (p.own && !node.data.ownFits))) { N += K0; node = nodeDetail(o, v, ctx, p, N, rf > 0 ? rf / N : 0, i); }
+      if (guard > 1) limits.splice(0, limits.length, node.ram.fits ? 'диск ноды' : 'RAM');
+      const K = racksFor(rf, N, s.rackPolicy);
+      return { N, racks: spread(N, K), K, node, limits, need: N };
+    });
+    let fits;
+    if (o.standalone) {
+      const n = dcs[0].node;
+      dcs[0].limits = [];
+      if (n.cpu.peakUtil > 100) dcs[0].limits.push('CPU');
+      if (!n.ram.fits) dcs[0].limits.push('RAM');
+      if (n.live > maxNodeBytes) dcs[0].limits.push('объём на ноду');
+      if (p.own && !n.data.ownFits) dcs[0].limits.push('диск ноды');
+      fits = dcs[0].limits.length === 0;
+    } else fits = dcs.every(d => d.N <= 2000);
+    const Ntot = dcs.reduce((a, d) => a + d.N, 0);
+    return { p, dcs, N: dcs[0].N, Ntot, fits, limits: dcs[0].limits, node: dcs[0].node, cost: Ntot * (p.c + p.ram / 4 + 12) };
+  }
+
+  function nodeDetail(o, v, ctx, p, N, share, dci) {
+    const s = o.s, F = o.F;
+    const live = (ctx.L + ctx.snapT) * share;
+    const windowData = ctx.compDay * o.Gf * v.W * share;
+    const head = Math.max(2 * windowData, 0.10 * live);
+    const repair = o.standalone ? 0 : 0.10 * live;
+    const snapRes = 0.05 * live;
+    const autoSnap = v.autoSnapTruncate ? ctx.L * share : 0;
+    const rawWriteNodeAvg = o.mutAvg * share * (ctx.avgRaw + M.mutOverhead);
+    const hints = o.standalone || F === 0 || N - F <= 0 ? 0 : rawWriteNodeAvg * M.hintWindowSec * F / (N - F);
+    const backups = ctx.B * share;
+    const reqData = (live + head + repair + snapRes + autoSnap + hints + backups) / (1 - M.fsReserve);
+    const steady = live + snapRes + autoSnap + backups;
+    const reqDataFinal = Math.max(reqData, steady / M.maxFill);
+    const fillLimit = Math.min(M.maxFill, steady / reqDataFinal);
+    const disk = s.disk || 'nvme', raid = s.raid || 'raid0';
+    let drives, ownFits = true;
+    if (p.own) {
+      const n = Math.max(1, Math.round(num(s.ownDrives, 2))), sz = num(s.ownDrive, 3.84);
+      const usable = Math.max(0, RAIDS[raid].eff(n)) * sz;
+      drives = { n, size: sz, raw: n * sz, usable };
+      ownFits = usable * 1e12 >= reqDataFinal;
+    } else drives = pickDrives(reqDataFinal / 1e12, disk, raid, s.drive || 'auto');
+    // RAM
+    const heap = heapFor(p.ram), memOff = heap / 4;
+    const compMeta = ctx.comp === 'lz4' ? live / 16384 * 8 / 1e9 : 0;
+    const windows = v.cleanup === 'ttl' ? Math.ceil((o.ret + v.W) / v.W) : Math.ceil(ctx.L / Math.max(1, ctx.compDay * o.Gf));
+    const bf = o.tags * o.Gf * Math.min(1, share) * windows * 1.25 / 1e9;
+    const fileCache = Math.min(2, heap / 4), osRes = 4;
+    const hot = Math.max(4, ctx.compDay * o.Gf * share / 1e9);
+    const need = heap + memOff + compMeta + bf + fileCache + osRes + hot;
+    const ram = { heap, memOff, compMeta, bf, fileCache, osRes, hot, need, have: p.ram, fits: need <= p.ram };
+    // CPU: нагрузка ДЦ пропорциональна доле ноды
+    const load = ctx.dcLoad[dci];
+    const rf = o.rep.dcs[dci].rf || 1;
+    const demand = (load.writeCores + load.readCores) * share / rf;
+    const peakUtil = demand / p.c * 100;
+    const failUtil = (o.standalone || N - F <= 0) ? peakUtil : (load.writeCores + load.readCores) * share / rf * N / (N - F) / p.c * 100;
+    const cpu = { cores: p.c, demand, peakUtil, failUtil };
+    // запись
+    const writesPeak = o.mutPeak * share, writesAvg = o.mutAvg * share;
+    const clMBs = writesPeak * (ctx.avgRaw + M.mutOverhead) / 1048576;
+    const clTotalMiB = clMBs * 60 > 8192 ? 16384 : 8192;
+    const clNeedGB = Math.max(64, clTotalMiB / 1024 * 2 + 16);
+    const clDrive = pickSmall(clNeedGB / 1000, [0.24, 0.48, 0.96, 1.92]);
+    const osNeedGB = 50 + heap + 20, osDrive = pickSmall(osNeedGB / 1000, [0.24, 0.48, 0.96]);
+    // чтение, диск
+    const rLoc = o.rLocal[dci];
+    const qNode = o.reads.q.total * rLoc * share / rf, qTsdb = o.reads.q.tsdb * rLoc * share / rf;
+    const sstPerRead = v.cleanup === 'ttl' ? 5 : 6;
+    const dk = DISK[disk];
+    const effDrives = drives.n ? Math.max(1, Math.floor(RAIDS[raid].eff(drives.n)) || 1) : 1;
+    const iopsNeed = qTsdb * sstPerRead * 0.75 + (qNode - qTsdb) * 0.2, iopsCap = dk.iops * effDrives;
+    // сеть
+    const intraBps = (o.standalone ? 0 : writesPeak * (ctx.avgRaw + M.mutOverhead) * 8) + o.reads.rows.total * rLoc * share / rf * 40 * 8;
+    const intraUtil = intraBps / (Math.max(0.1, num(s.netIn, 10)) * 1e9) * 100;
+    const D = o.rep.dcs.length;
+    const interBps = D > 1 ? o.mutPeak * (ctx.avgRaw + M.mutOverhead) * 8 * (D - 1) * 0.6 : 0;
+    const interUtil = D > 1 ? interBps / (Math.max(0.01, num(s.netDc, 1)) * 1e9) * 100 : 0;
+    // задержки, ориентир
+    const rttIn = num(s.rttIn, 0.3), rttDc = num(s.rttDc, 20);
+    const crossW = o.req.W.needsRemote, crossR = o.req.R.needsRemote;
+    const latW = 5 + (o.standalone ? 0 : rttIn) + (crossW ? rttDc : 0) + (disk === 'hdd' ? 6 : 0) + (o.standalone && num(s.rpo, 10) < 1 ? 15 : 0);
+    const rowsPage = Math.min(o.reads.page, o.reads.rowsWin);
+    const latR = 7 + (o.standalone ? 0 : rttIn) + (crossR ? rttDc : 0) + sstPerRead * dk.lat * 2 + rowsPage * 0.0015 * ctx.tf;
+    // восстановление ноды: обычный streaming (TWCS-SSTable покрывают все диапазоны vnode)
+    const netMBs = Math.max(0.1, num(s.netIn, 10)) * 1e9 / 8 / 1e6;
+    const sources = o.standalone ? 0 : Math.min(N - 1, 4);
+    const defRate = Math.min(sources * 24 * 1.048576, netMBs * 0.7, dk.mbs * effDrives);
+    const recPerSrc = Math.min(100, Math.max(24, Math.floor(netMBs * 0.25 / 8) * 8));
+    const recRate = Math.min(sources * recPerSrc * 1.048576, netMBs * 0.7, dk.mbs * effDrives);
+    return {
+      N, share, live, windowData, head, repair, snapRes, autoSnap, hints, backups, reqData: reqDataFinal, fillLimit, steady,
+      data: { drives, raid, disk, ownFits },
+      commitlog: { mbs: clMBs, totalMiB: clTotalMiB, needGB: clNeedGB, drive: clDrive }, os: { needGB: osNeedGB, drive: osDrive },
+      ram, cpu, writes: { peak: writesPeak, avg: writesAvg, rawBpsAvg: rawWriteNodeAvg },
+      reads: { q: qNode, qTsdb, sstPerRead, iopsNeed, iopsCap, iopsUtil: iopsNeed / iopsCap * 100 },
+      net: { intraBps, intraUtil, interBps, interUtil }, lat: { w: latW, r: latR, rowsPage },
+      rto: { sources, recPerSrc, defH: sources ? live / 1e6 / defRate / 3600 : null, recH: sources ? live / 1e6 / recRate / 3600 : null }
+    };
+  }
+
+  /* ---------- проверки ---------- */
+  function fmtB(b) { return b >= 1e12 ? (b / 1e12).toFixed(1).replace('.', ',') + ' ТБ' : Math.round(b / 1e9) + ' ГБ'; }
+  function buildChecks(o) {
+    const out = [];
+    const add = (sev, scope, title, text, fix) => out.push({ sev, scope, title, text, fix: fix || '' });
+    const s = o.s, cur = o.variants.cur, rec = o.variants.rec, rep = o.rep;
+    const rf0 = rep.dcs[0].rf;
+    if (o.standalone) {
+      add('warn', 'Отказоустойчивость', 'Одна копия данных', 'Отказ сервера останавливает запись и чтение. При потере data-диска данные восстанавливаются только из резервной копии.', 'Data-диск в RAID 1 или RAID 10, ежедневный nodetool snapshot с выгрузкой на внешнее хранилище.');
+      if (['none', 'raid0', 'jbod'].includes(s.raid)) add('crit', 'Хранилище', 'Нет избыточности дисков', RAIDS[s.raid].label + ' на одной ноде: отказ накопителя означает потерю данных.', 'Для одной ноды используйте RAID 1 или RAID 10.');
+      if (!rec.chosen.fits) add('crit', 'Ресурсы', 'Нагрузка не помещается на один сервер', 'Ограничения: ' + rec.chosen.limits.join(', ') + '.', 'Перейдите в режим «Кластер».');
+    } else {
+      if (o.tol.w < rep.F) add('crit', 'Отказоустойчивость', 'Запись остановится при ' + rep.F + ' отказах', 'RF ' + rf0 + ', запись ' + rep.wcl + ' выдерживает отказ ' + Math.max(0, o.tol.w) + ' нод.', 'Для ' + rep.F + ' отказов при QUORUM нужен RF ≥ ' + (2 * rep.F + 1) + ', при LOCAL_ONE RF ≥ ' + (rep.F + 1) + '.');
+      if (o.tol.r < rep.F) add('crit', 'Отказоустойчивость', 'Чтение остановится при ' + rep.F + ' отказах', 'RF ' + rf0 + ', чтение ' + rep.rcl + ' выдерживает отказ ' + Math.max(0, o.tol.r) + ' нод.', 'Увеличьте RF или понизьте consistency level чтения.');
+      if (o.consistent === false) add('warn', 'Отказоустойчивость', 'Тренд может кратко не показать последние точки', 'Запись и чтение не перекрываются гарантированно (W + R ≤ RF).', 'Для строгой согласованности: LOCAL_QUORUM на запись и чтение.');
+      if (o.consistent === null) add('crit', 'Отказоустойчивость', 'Consistency level не выполняется', 'Запись или чтение требует больше реплик, чем задано RF.', 'Проверьте RF и consistency level.');
+      if (rep.dcs.some(d => d.rf === 1)) add('crit', 'Отказоустойчивость', 'RF 1 в кластере', 'Каждая партиция хранится на одной ноде: отказ диска означает потерю данных.', 'RF не меньше 2, рекомендуемо 3.');
+      if (rep.dcs.length > 1 && (o.req.W.needsRemote || o.req.R.needsRemote)) add('warn', 'Отказоустойчивость', 'Каждая операция ждёт удалённый ДЦ', 'Consistency level требует ответа из другого ДЦ: задержка не меньше RTT между ДЦ (' + s.rttDc + ' мс), обрыв связи останавливает операции.', 'Используйте LOCAL_QUORUM или LOCAL_ONE.');
+      if (rep.F === 0) add('warn', 'Отказоустойчивость', 'Отказ любой ноды не допускается', 'Допустимых отказов: 0.', 'Для MES в производстве рекомендуемо не меньше 1.');
+    }
+    // хранение, текущая схема
+    if (s.backups === 'on_nocleanup') add('crit', 'Хранилище', 'incremental_backups копит файлы без очистки', 'На каждый flush создаётся hard link в backups/. За ' + Math.round(o.horizonDays) + ' сут это ' + fmtB(cur.B) + ' в одной копии, место не освобождается.', 'ALTER TABLE ... WITH incremental_backups = false; либо выгрузка и очистка backups/ по расписанию.');
+    if (s.cleanup === 'delete') add('crit', 'Хранилище', 'DELETE при TWCS не освобождает место', 'Старые данные и их tombstone лежат в разных окнах TWCS и не объединяются: ' + fmtB(cur.L) + ' в одной копии против ' + fmtB(rec.L) + ' с TTL.', 'Перейти на default_time_to_live (без доработки MES) или запускать nodetool garbagecollect после DELETE.');
+    if (s.cleanup === 'truncate') add('crit', 'Хранилище', 'TRUNCATE оставляет snapshot', 'При allow_auto_snapshot = true перед TRUNCATE создаётся snapshot таблицы: место не освобождается до nodetool clearsnapshot.', 'ALTER TABLE ... WITH allow_auto_snapshot = false или nodetool clearsnapshot после очистки.');
+    // tombstone при чтении
+    const pageRows = Math.min(M.page, Math.max(1, num(o.reads.u.trWin, 8) * 3600 / o.minPer));
+    const tombPage = pageRows * cur.tombPerRow;
+    if (tombPage > 100000) add('crit', 'Чтение', 'Превышение tombstone_failure_threshold', 'Страница тренда ≈' + Math.round(tombPage).toLocaleString('ru-RU') + ' tombstone: запрос завершится ошибкой.', 'Не передавать null из драйвера (Unset.Value).');
+    else if (tombPage > 1000) add('warn', 'Чтение', 'Tombstone в каждой строке', 'Явные null дают 5 tombstone-ячеек на точку, страница тренда ≈' + Math.round(tombPage).toLocaleString('ru-RU') + ': предупреждения в system.log и медленнее чтение.', 'В драйвере C# передавать Unset.Value вместо null. Без доработки tombstone_warn_threshold поднимается в cassandra.yaml.');
+    // размер партиции
+    const rowsPart = o.partSec / o.minPer;
+    let fastRow = 0;
+    for (const gr of o.groups) if (gr.period === o.minPer) fastRow = Math.max(fastRow, SZ.rowRaw(pointParams(o, gr, cur.v), 'cur'));
+    const partBytes = rowsPart * fastRow;
+    if (partBytes > 100 * 1048576) add('warn', 'Модель данных', 'Партиция больше 100 МиБ', 'Тег с периодом ' + o.minPer + ' с за PartitionSize ' + (o.partSec / 86400).toFixed(1).replace('.', ',') + ' сут ≈ ' + Math.round(partBytes / 1048576) + ' МиБ до сжатия.', 'Для быстрых тегов уменьшить PartitionSize до ' + Math.max(1, Math.floor(o.partSec / 86400 * 100 * 1048576 / partBytes)) + ' сут.');
+    // диски
+    if (s.disk === 'hdd') add('warn', 'Хранилище', 'HDD под оперативные данные', 'Чтение с HDD ≈ 9 мс на SSTable: тренды открываются медленно, compaction конкурирует с чтением.', 'Data и commitlog на SSD или NVMe.');
+    if (s.raid === 'raid5' || s.raid === 'raid6') add('warn', 'Хранилище', s.raid.toUpperCase() + ' на data-диске', 'Штраф записи RAID 5/6 при постоянном compaction и медленная работа при деградации массива.', o.standalone ? 'Для одной ноды RAID 10.' : 'В кластере с RF ≥ 3 достаточно RAID 0 или JBOD.');
+    if (!o.standalone && (s.raid === 'raid1' || s.raid === 'raid10') && rf0 >= 3) add('info', 'Хранилище', 'Двойная избыточность', 'RAID ' + (s.raid === 'raid1' ? '1' : '10') + ' вместе с RF ' + rf0 + ' удваивает число накопителей.', 'При RF ≥ 3 достаточно RAID 0 или JBOD.');
+    if (rec.node.data.drives.impossible) add('crit', 'Хранилище', 'Выбранный RAID не вмещает данные', RAIDS[s.raid].label + ' на одном накопителе не даёт ' + fmtB(rec.node.reqData) + '.', 'Выберите RAID 0, RAID 10 или JBOD.');
+    if (rec.own && !rec.node.data.ownFits) add('crit', 'Своё оборудование', 'Data-диск ноды мал', 'Нужно ' + fmtB(rec.node.reqData) + ' на ноду.', 'Добавьте накопители или ноды.');
+    if (rec.own && !rec.node.ram.fits) add('crit', 'Своё оборудование', 'Не хватает RAM', 'Нужно ' + Math.ceil(rec.node.ram.need) + ' ГБ, есть ' + rec.chosen.p.ram + ' ГБ.', 'Увеличьте RAM.');
+    rec.dcs.forEach((d, i) => { if (d.manual && d.N < d.need) add('crit', 'Топология', rep.dcs[i].name + ': нод меньше расчётного', 'В схеме ' + d.N + ' нод, по расчёту нужно не меньше ' + d.need + '.', 'Добавьте ноды или вернитесь к рекомендованной топологии.'); });
+    if (rec.node.cpu.failUtil > 85) add('warn', 'Ресурсы', 'CPU после отказа выше 85 %', 'После отказа ' + o.F + ' нод загрузка оставшихся в пике ≈ ' + Math.round(rec.node.cpu.failUtil) + ' %.', 'Добавьте ноды или ядра.');
+    if (rec.node.net.intraUtil > 40) add('warn', 'Сеть', 'Сеть между нодами загружена на ' + Math.round(rec.node.net.intraUtil) + ' %', 'Пиковый трафик репликации близок к пропускной способности.', 'Сеть 10 Гбит/с и выше.');
+    if (rec.node.net.interUtil > 40) add('warn', 'Сеть', 'Канал между ДЦ загружен на ' + Math.round(rec.node.net.interUtil) + ' %', 'Репликация в другие ДЦ в пике.', 'Расширьте канал или включите internode_compression: all.');
+    // SLA
+    const sw = num(s.slaW, 0), sr = num(s.slaR, 0);
+    if (sw > 0 && rec.node.lat.w > sw) add('warn', 'SLA', 'p99 записи ' + sw + ' мс под угрозой', 'Оценка ≈ ' + rec.node.lat.w.toFixed(0) + ' мс.', 'NVMe, consistency level LOCAL_*; подтвердить нагрузочным тестом.');
+    if (sr > 0 && rec.node.lat.r > sr) add('warn', 'SLA', 'p99 чтения ' + sr + ' мс под угрозой', 'Оценка страницы тренда ≈ ' + rec.node.lat.r.toFixed(0) + ' мс.', 'NVMe, Unset.Value вместо null.');
+    const rto = num(s.rto, 0);
+    if (!o.standalone && rto > 0 && rec.node.rto.recH != null && rec.node.rto.recH > rto) add('warn', 'RTO', 'Замена ноды дольше ' + rto + ' ч', 'Восстановление ' + fmtB(rec.node.live) + ' занимает ≈ ' + rec.node.rto.recH.toFixed(1).replace('.', ',') + ' ч.', 'Меньше данных на ноду (больше нод) или более быстрая сеть.');
+    if (o.calib.valid && o.calib.suspicious) add('warn', 'Калибровка', 'Факт отличается от модели более чем вдвое', 'Факт ' + o.calib.measured.toFixed(1) + ' Б на точку, модель ' + o.calib.model.toFixed(1) + ' Б.', 'Проверьте ввод: Space used (live) одной ноды, число нод, RF, глубину хранения и поток точек.');
+    return out;
+  }
+
+  /* ---------- конфигурация ---------- */
+  function cfgVals(o, v) {
+    const n = v.node, p = v.chosen.p, s = o.s;
+    const d = n.data.drives;
+    return {
+      n, p, d, concR: s.disk === 'hdd' ? 16 * Math.max(1, d.n || 1) : s.disk === 'ssd' ? 32 : 64,
+      concW: Math.min(128, 8 * p.c), compactors: Math.max(2, Math.min(8, Math.floor(p.c / 4))),
+      compTh: { nvme: '256MiB/s', ssd: '128MiB/s', hdd: '32MiB/s' }[s.disk || 'nvme'],
+      flushW: s.disk === 'hdd' ? 2 : Math.max(2, Math.min(4, Math.floor(p.c / 8))),
+      fillWarn: Math.round(n.fillLimit * 100),
+      tombWarn: v.tombPerRow > 0 ? Math.max(1000, Math.ceil(M.page * v.tombPerRow * 1.2 / 1000) * 1000) : 1000,
+      hintsMiB: o.standalone ? 0 : Math.max(1024, Math.ceil(n.writes.rawBpsAvg * M.hintWindowSec * 2 / 1048576 / 1024) * 1024)
+    };
+  }
+  function nodeNames(o, v) {
+    const T = FT.buildTopology(ftState(o, v.topo));
+    return T;
+  }
+  function genYaml(o, v) {
+    const c = cfgVals(o, v), s = o.s, n = c.n, T = nodeNames(o, v);
+    const jbod = n.data.raid === 'jbod' && c.d.n > 1;
+    const dataDirs = jbod ? Array.from({ length: c.d.n }, (_, i) => '  - /mnt/cass-data' + (i + 1) + '/data').join('\n') : '  - /var/lib/cassandra/data';
+    const aux = jbod ? '/mnt/cass-data1' : '/var/lib/cassandra';
+    const rpo = num(s.rpo, 10);
+    let sync;
+    if (o.standalone && rpo < 1) sync = 'commitlog_sync: group\ncommitlog_sync_group_window: 15ms';
+    else if (o.standalone && rpo < 10) sync = 'commitlog_sync: periodic\ncommitlog_sync_period: ' + Math.max(1, Math.floor(rpo)) * 1000 + 'ms';
+    else sync = 'commitlog_sync: periodic\ncommitlog_sync_period: 10000ms';
+    const seeds = [];
+    T.dcs.forEach(dc => { const own = []; for (const r of dc.racks) { if (own.length >= 3) break; own.push('<IP ' + T.nodes[r.nodes[0]].name + '>'); } if (own.length < Math.min(2, dc.N)) own.push('<IP ' + T.nodes[dc.nodes[1]].name + '>'); seeds.push(...own); });
+    const rf0 = Math.max(1, o.rep.dcs[0].rf);
+    return `# cassandra.yaml, Apache Cassandra ${CASSANDRA_VERSION}
+# Основа: conf/cassandra_latest.yaml из дистрибутива ${CASSANDRA_VERSION}, ниже изменяемые параметры.
+# Нода: ${c.p.c} ядер, ${c.p.ram} ГБ RAM, data ${c.d.n || '?'} × ${c.d.size} ТБ ${DISK[n.data.disk].label} ${RAIDS[n.data.raid].label}
+
+cluster_name: 'MES_TSDB'
+num_tokens: ${num(s.numTokens, 16)}
+allocate_tokens_for_local_replication_factor: ${rf0}
+endpoint_snitch: GossipingPropertyFileSnitch
+seed_provider:
+  - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+    parameters:
+      - seeds: "${seeds.join(',')}"
+listen_address: <IP этой ноды>
+rpc_address: <IP этой ноды>
+
+data_file_directories:
+${dataDirs}
+commitlog_directory: /var/lib/cassandra/commitlog   # отдельный накопитель
+hints_directory: ${aux}/hints
+saved_caches_directory: ${aux}/saved_caches
+
+${sync}
+commitlog_segment_size: 32MiB
+commitlog_total_space: ${n.commitlog.totalMiB}MiB
+
+# Новый кластер: формат SSTable 5.0 (как в cassandra_latest.yaml).
+# В cassandra.yaml по умолчанию стоит CASSANDRA_4 и пишется формат nb версии 4.x.
+storage_compatibility_mode: NONE
+sstable:
+  selected_format: bti
+
+memtable_allocation_type: offheap_objects
+memtable_flush_writers: ${c.flushW}
+concurrent_reads: ${c.concR}
+concurrent_writes: ${c.concW}
+concurrent_compactors: ${c.compactors}
+compaction_throughput: ${c.compTh}
+stream_throughput_outbound: ${n.rto.recPerSrc}MiB/s
+
+internode_compression: dc
+hinted_handoff_enabled: true
+max_hint_window: 3h${o.standalone ? '' : '\nmax_hints_size_per_host: ' + c.hintsMiB + 'MiB'}
+
+tombstone_warn_threshold: ${c.tombWarn}
+tombstone_failure_threshold: 100000
+incremental_backups: false
+
+authenticator: PasswordAuthenticator
+authorizer: CassandraAuthorizer
+role_manager: CassandraRoleManager
+${o.rep.lwt ? 'paxos_variant: v2\n' : ''}
+partition_size_warn_threshold: 100MiB
+data_disk_usage_percentage_warn_threshold: ${c.fillWarn}
+data_disk_usage_percentage_fail_threshold: ${Math.min(95, c.fillWarn + 10)}
+`;
+  }
+  function genCql(o, v) {
+    const repl = o.rep.dcs.filter(d => d.rf > 0).map(d => "'" + d.name + "': " + d.rf).join(', ');
+    const sys = o.rep.dcs.map((d, i) => "'" + d.name + "': " + Math.min(3, v.dcs[i].N)).join(', ');
+    let t = `-- schema_changes.cql: выполнить в cqlsh на одной ноде
+ALTER KEYSPACE "TSDB" WITH replication = {'class': 'NetworkTopologyStrategy', ${repl}};
+ALTER KEYSPACE system_auth WITH replication = {'class': 'NetworkTopologyStrategy', ${sys}};
+ALTER KEYSPACE system_distributed WITH replication = {'class': 'NetworkTopologyStrategy', ${sys}};
+ALTER KEYSPACE system_traces WITH replication = {'class': 'NetworkTopologyStrategy', ${sys}};
+-- После изменения RF: nodetool repair --full на каждой ноде по очереди.
+`;
+    if (v.v.key === 'cur') return t + '\n-- Вариант «Текущая схема»: таблицы не меняются.\n';
+    t += `
+-- data_points: удаление по TTL вместо внешнего DELETE.
+-- default_time_to_live действует на новые записи; внешнюю очистку отключить после истечения срока хранения старых данных.
+ALTER TABLE "TSDB".data_points WITH
+    default_time_to_live = ${o.ttlSec}
+    AND gc_grace_seconds = ${v.v.gcSec}
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy',
+                      'compaction_window_unit': 'DAYS', 'compaction_window_size': '${v.v.W}',
+                      'unchecked_tombstone_compaction': 'true'}
+    AND compression = ${o.s.comp === 'none' ? "{'enabled': 'false'}" : "{'class': 'org.apache.cassandra.io.compress.LZ4Compressor', 'chunk_length_in_kb': '16'}"}
+    AND incremental_backups = false;
+
+ALTER TABLE "TSDB".snapshots WITH incremental_backups = false;
+`;
+    return t;
+  }
+  function genRack(o, v) {
+    const T = nodeNames(o, v);
+    let t = '# cassandra-rackdc.properties: свой файл на каждой ноде\n';
+    T.dcs.forEach(dc => dc.racks.forEach(r => r.nodes.forEach(id => { t += '\n# ' + T.nodes[id].name + '\ndc=' + dc.name + '\nrack=' + r.name + '\n'; })));
+    return t;
+  }
+  function genCsharp(o, v) {
+    const T = nodeNames(o, v);
+    const cps = T.dcs[0].racks.slice(0, 3).map(r => '"<IP ' + T.nodes[r.nodes[0]].name + '>"').join(', ');
+    const cl = x => x.split('_').map(w => w[0] + w.slice(1).toLowerCase()).join('');
+    return `// DataStax C# Driver for Apache Cassandra (NuGet: CassandraCSharpDriver 3.x)
+using Cassandra;
+
+var cluster = Cluster.Builder()
+    .AddContactPoints(${cps})
+    .WithLoadBalancingPolicy(new TokenAwarePolicy(new DCAwareRoundRobinPolicy("${T.dcs[0].name}")))
+    .WithQueryOptions(new QueryOptions()
+        .SetConsistencyLevel(ConsistencyLevel.${cl(o.rep.rcl)})
+        .SetSerialConsistencyLevel(ConsistencyLevel.${cl(o.rep.scl || 'LOCAL_SERIAL')})
+        .SetPageSize(${M.page}))
+    .Build();
+var session = cluster.Connect("TSDB");
+
+// Запись точки: consistency level записи задаётся на запросе
+var insert = session.Prepare(
+    "INSERT INTO data_points (partition_id, event_time, double_value, quality_mark_statenumber, annotation) VALUES (?, ?, ?, ?, ?)");
+var stmt = insert.Bind(partitionId, eventTime, value, 192, ${v.v.unset ? 'annotation ?? (object)Unset.Value' : 'annotation'})
+    .SetConsistencyLevel(ConsistencyLevel.${cl(o.rep.wcl)})
+    .SetIdempotence(true);
+await session.ExecuteAsync(stmt);
+${v.v.unset ? `
+// Пустые колонки не передавать: Unset.Value вместо null (протокол v4+).
+// Каждый null записывается как tombstone-ячейка и замедляет чтение.` : `
+// Сейчас пустые колонки передаются как null: 5 tombstone-ячеек на точку.
+// Доработка: Unset.Value вместо null, см. вариант «+ доработка драйвера».`}
+// Не задавать USING TIMESTAMP по event_time: дозапись истории попадёт в старые окна TWCS.
+`;
+  }
+  function genJvm(o, v) {
+    const p = v.chosen.p, h = v.node.ram.heap, par = Math.min(p.c, 16);
+    return `# conf/jvm-server.options
+-Xms${h}G
+-Xmx${h}G
+
+# conf/jvm17-server.options (JDK 17, G1GC)
+-XX:+UseG1GC
+-XX:+ParallelRefProcEnabled
+-XX:MaxTenuringThreshold=2
+-XX:G1HeapRegionSize=16m
+-XX:MaxGCPauseMillis=300
+-XX:InitiatingHeapOccupancyPercent=70
+-XX:ParallelGCThreads=${par}
+-XX:ConcGCThreads=${Math.max(1, Math.floor(par / 4))}
+`;
+  }
+  function genOs(o, v) {
+    const n = v.node, raid = n.data.raid, d = n.data.drives;
+    const dev = raid === 'none' || (raid === 'raid0' && d.n === 1) ? '/dev/nvme1n1' : raid === 'jbod' ? '/dev/nvme1n1' : '/dev/md0';
+    return `# Подготовка ОС на каждой ноде (Linux)
+# /etc/sysctl.d/60-cassandra.conf
+vm.max_map_count = 1048575
+vm.swappiness = 1
+
+# swapoff -a и убрать swap из /etc/fstab
+# /etc/security/limits.d/cassandra.conf
+cassandra - memlock unlimited
+cassandra - nofile 1048576
+cassandra - nproc 32768
+
+# Transparent Huge Pages
+echo never > /sys/kernel/mm/transparent_hugepage/enabled
+echo never > /sys/kernel/mm/transparent_hugepage/defrag
+
+# Data-том: XFS, noatime; имена устройств подставить свои (lsblk)
+mkfs.xfs ${dev}
+${dev}  /var/lib/cassandra  xfs  defaults,noatime  0 0
+blockdev --setra ${o.s.disk === 'hdd' ? 64 : 8} ${dev}
+`;
+  }
+  function genRepair(o, v) {
+    if (o.standalone) return '# Одна нода: repair не нужен. Резервная копия раз в сутки:\nnodetool snapshot -t daily_$(date +%F) TSDB\n# выгрузить snapshots/ на внешнее хранилище, затем:\nnodetool clearsnapshot -t daily_$(date +%F) TSDB\n';
+    return `# Repair: каждая нода по очереди, раз в неделю
+nodetool repair -pr --full TSDB
+# snapshots: gc_grace_seconds = 864000, repair чаще 10 суток обязателен.
+
+# Контроль после ввода
+nodetool status TSDB
+nodetool tablestats TSDB.data_points     # Space used (live), SSTable Compression Ratio
+nodetool compactionstats
+nodetool tpstats
+`;
+  }
+  function configs(o, v) {
+    return [
+      { id: 'yaml', file: 'cassandra.yaml', title: 'основные параметры', text: genYaml(o, v), main: true },
+      { id: 'cql', file: 'schema_changes.cql', title: 'ALTER KEYSPACE и ALTER TABLE', text: genCql(o, v), main: true },
+      { id: 'cs', file: 'MesCassandra.cs', title: 'подключение из C#', text: genCsharp(o, v), main: true },
+      { id: 'rack', file: 'cassandra-rackdc.properties', title: 'dc и rack каждой ноды', text: genRack(o, v) },
+      { id: 'jvm', file: 'jvm-options.txt', title: 'heap и GC', text: genJvm(o, v) },
+      { id: 'os', file: 'os-checklist.sh', title: 'подготовка сервера', text: genOs(o, v) },
+      { id: 'ops', file: 'repair-and-monitoring.sh', title: 'эксплуатация', text: genRepair(o, v) }
+    ];
+  }
+
+  const API = { APP_VERSION, CASSANDRA_VERSION, TYPE_ORDER, TYPE_COL, PROFILES, DRIVES, DISK, RAIDS, USAGE, PRESETS, M,
+    defaultState, compute, resolveRep, ftState, parseTablestats, configs, heapFor, pickDrives, readModel, num };
+  if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.CEngine = API;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* Минимальные ZIP (STORE) и XLSX без внешних библиотек: страница работает без интернета. */
+(function (root) {
+  'use strict';
+  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  const enc = s => new TextEncoder().encode(s);
+
+  function zip(files) {
+    const now = new Date();
+    const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+    const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+    const parts = [], central = [];
+    let off = 0;
+    for (const f of files) {
+      const name = enc(f.name), data = typeof f.data === 'string' ? enc(f.data) : f.data, crc = crc32(data);
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+      h.setUint16(10, dosTime, true); h.setUint16(12, dosDate, true); h.setUint32(14, crc, true);
+      h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, name.length, true); h.setUint16(28, 0, true);
+      parts.push(new Uint8Array(h.buffer), name, data);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true);
+      c.setUint16(12, dosTime, true); c.setUint16(14, dosDate, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true);
+      c.setUint16(28, name.length, true); c.setUint16(30, 0, true); c.setUint16(32, 0, true); c.setUint16(34, 0, true); c.setUint16(36, 0, true);
+      c.setUint32(38, 0, true); c.setUint32(42, off, true);
+      central.push(new Uint8Array(c.buffer), name);
+      off += 30 + name.length + data.length;
+    }
+    const cenSize = central.reduce((a, b) => a + b.length, 0);
+    const e = new DataView(new ArrayBuffer(22));
+    e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+    e.setUint32(12, cenSize, true); e.setUint32(16, off, true);
+    const all = [...parts, ...central, new Uint8Array(e.buffer)];
+    const out = new Uint8Array(all.reduce((a, b) => a + b.length, 0));
+    let p = 0; for (const a of all) { out.set(a, p); p += a.length; }
+    return out;
+  }
+
+  const xe = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+  function colName(i) { let s = ''; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+  function sheetXml(rows, widths) {
+    let x = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>';
+    if (widths && widths.length) x += '<cols>' + widths.map((w, i) => '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>').join('') + '</cols>';
+    x += '<sheetData>';
+    rows.forEach((r, ri) => {
+      x += '<row r="' + (ri + 1) + '">';
+      r.forEach((v, ci) => {
+        if (v == null || v === '') return;
+        const ref = colName(ci) + (ri + 1), st = ri === 0 ? ' s="1"' : '';
+        if (typeof v === 'number' && Number.isFinite(v)) x += '<c r="' + ref + '"' + st + '><v>' + v + '</v></c>';
+        else x += '<c r="' + ref + '" t="inlineStr"' + st + '><is><t xml:space="preserve">' + xe(v) + '</t></is></c>';
+      });
+      x += '</row>';
+    });
+    return x + '</sheetData></worksheet>';
+  }
+  function xlsx(sheets) {
+    const files = [];
+    files.push({ name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + sheets.map((s, i) => '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join('') + '</Types>' });
+    files.push({ name: '_rels/.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' });
+    files.push({ name: 'xl/workbook.xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' + sheets.map((s, i) => '<sheet name="' + xe(s.name.slice(0, 31)) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>').join('') + '</sheets></workbook>' });
+    files.push({ name: 'xl/_rels/workbook.xml.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + sheets.map((s, i) => '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>').join('') + '<Relationship Id="rId' + (sheets.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' });
+    files.push({ name: 'xl/styles.xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE6F4EA"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>' });
+    sheets.forEach((s, i) => files.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: sheetXml(s.rows, s.widths) }));
+    return zip(files);
+  }
+  const API = { crc32, zip, xlsx };
+  if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.CXlsx = API;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+(function () {
+'use strict';
+const E = window.CEngine, FT = window.CCalc, SZ = window.CSize, XL = window.CXlsx;
+const LS = 'mes-cass-calc-v2', LS_CMP = 'mes-cass-calc-cmp-v2';
+const $ = id => document.getElementById(id);
+const clone = x => JSON.parse(JSON.stringify(x));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const nf = (x, d = 0) => (Number.isFinite(x) ? Number(x).toLocaleString('ru-RU', { maximumFractionDigits: d }) : '—');
+const nfa = x => nf(x, Math.abs(x) < 10 ? 2 : Math.abs(x) < 100 ? 1 : 0);
+function fB(b) {
+  if (!Number.isFinite(b)) return '—';
+  if (b >= 1e15) return nf(b / 1e15, 2) + ' ПБ';
+  if (b >= 1e12) return nf(b / 1e12, b >= 1e14 ? 0 : 2) + ' ТБ';
+  if (b >= 1e9) return nf(b / 1e9, b >= 1e11 ? 0 : 1) + ' ГБ';
+  if (b >= 1e6) return nf(b / 1e6, 0) + ' МБ';
+  return nf(b / 1e3, 0) + ' КБ';
+}
+const fTB = tb => nf(tb, 2) + ' ТБ';
+const pct = x => nf(x, x < 10 ? 1 : 0) + ' %';
+function plural(n, a, b, c) { n = Math.abs(Math.round(n)) % 100; const n1 = n % 10; if (n > 10 && n < 20) return c; if (n1 > 1 && n1 < 5) return b; if (n1 === 1) return a; return c; }
+const dsz = sz => sz < 1 ? nf(sz * 1000, 0) + ' ГБ' : nf(sz, 2) + ' ТБ';
+const VN = { cur: 'Текущая схема', rec: 'Рекомендации', unset: 'Рекомендации + доработка драйвера' };
+
+/* ---------- состояние ---------- */
+function merge(base, s) { const o = Object.assign(clone(base), s || {}); o.calib = Object.assign(clone(base.calib), (s && s.calib) || {}); if (!Array.isArray(o.groups) || !o.groups.length) o.groups = clone(base.groups); return o; }
+function fromHash() {
+  const m = /[#&]s=([A-Za-z0-9_-]+)/.exec(location.hash || '');
+  if (!m) return null;
+  try { const b = m[1].replace(/-/g, '+').replace(/_/g, '/'); return JSON.parse(decodeURIComponent(escape(atob(b)))); } catch (e) { return null; }
+}
+function toHash(s) { return btoa(unescape(encodeURIComponent(JSON.stringify(s)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function load() { try { const t = localStorage.getItem(LS); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
+function persist() { try { localStorage.setItem(LS, JSON.stringify(S)); } catch (e) { } }
+function loadCmp() { try { return JSON.parse(localStorage.getItem(LS_CMP) || '[]'); } catch (e) { return []; } }
+function saveCmp() { try { localStorage.setItem(LS_CMP, JSON.stringify(CMP)); } catch (e) { } }
+const DEF = E.defaultState();
+let S = merge(DEF, fromHash() || load());
+let VAR = 'rec', TAB = 'sum', R = null, FTR = null, timer = null, CMP = loadCmp(), probTask = null, probToken = 0, failed = null, failSig = '';
+const CODE = [];
+
+let tt = null;
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 3200); }
+
+/* ---------- поля ---------- */
+function fillSelects() {
+  const cl = FT.WRITE_CL.filter(c => c !== 'ANY');
+  $('f-wcl').innerHTML = cl.map(c => `<option>${c}</option>`).join('');
+  $('f-rcl').innerHTML = FT.READ_CL.map(c => `<option>${c}</option>`).join('');
+  $('preset').innerHTML = '<option value="">Загрузить пример…</option>' + Object.entries(E.PRESETS).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('');
+  fillDrive();
+}
+function fillDrive() {
+  const sizes = E.DRIVES[S.disk] || E.DRIVES.nvme;
+  if (S.drive !== 'auto' && !sizes.includes(Number(S.drive))) S.drive = 'auto';
+  $('f-drive').innerHTML = '<option value="auto">Подобрать</option>' + sizes.map(z => `<option value="${z}">${dsz(z)}</option>`).join('');
+  $('f-drive').value = String(S.drive);
+}
+function setField(el) {
+  const k = el.dataset.k, v = S[k];
+  if (el.type === 'radio') el.checked = String(v) === el.value;
+  else if (el.type === 'checkbox') el.checked = !!v;
+  else el.value = v == null ? '' : v;
+}
+function syncFields() { document.querySelectorAll('[data-k]').forEach(setField); renderRfGrid(); }
+function applyVis() {
+  document.querySelectorAll('[data-show]').forEach(el => {
+    const c = el.dataset.show;
+    let on;
+    if (c === 'dcmulti') on = S.mode === 'cluster' && Number(S.dc) > 1;
+    else { const [k, vals] = c.split('='); on = vals.split('|').includes(String(S[k])); }
+    el.hidden = !on;
+  });
+}
+function renderRfGrid() {
+  const D = Math.max(1, Math.min(5, Math.round(Number(S.dc) || 1)));
+  if (!Array.isArray(S.rfs)) S.rfs = [3, 3, 3, 3, 3];
+  $('rfGrid').innerHTML = Array.from({ length: D }, (_, i) => `<div class="fld"><label for="f-rf${i}">RF в DC${i + 1}</label><input type="number" id="f-rf${i}" data-rf="${i}" min="${i ? 0 : 1}" max="9" step="1" value="${esc(S.rfs[i] ?? 3)}"></div>`).join('');
+}
+document.addEventListener('input', onField);
+document.addEventListener('change', onField);
+function onField(e) {
+  const el = e.target;
+  if (el.dataset && el.dataset.rf != null) { const v = parseFloat(el.value); if (Number.isFinite(v)) { S.rfs[+el.dataset.rf] = v; S.topo = null; schedule(e.type === 'change' ? 0 : 200); } return; }
+  if (el.dataset && el.dataset.c) { S.calib[el.dataset.c] = el.type === 'checkbox' ? el.checked : el.value; schedule(e.type === 'change' ? 0 : 250); return; }
+  if (!el.dataset || !el.dataset.k) return;
+  const k = el.dataset.k;
+  let v;
+  if (el.type === 'checkbox') v = el.checked;
+  else if (el.type === 'radio') { if (!el.checked) return; v = el.value; }
+  else if (el.type === 'number') { v = parseFloat(el.value); if (!Number.isFinite(v)) return; }
+  else v = el.value;
+  if (k === 'numTokens') v = +v;
+  if (S[k] === v) return;
+  S[k] = v;
+  if (k === 'disk') fillDrive();
+  if (['mode', 'hw', 'dc', 'F', 'cons', 'manual', 'rackPolicy'].includes(k)) { S.topo = null; S.profileOverride = null; }
+  if (k === 'dc') renderRfGrid();
+  if (k === 'mode' && v === 'standalone' && ['raid0', 'jbod', 'none'].includes(S.raid)) { S.raid = 'raid10'; setField($('f-raid')); toast('Для одной ноды RAID data-диска переключён на RAID 10'); }
+  applyVis();
+  schedule(e.type === 'change' ? 0 : 200);
+}
+
+/* ---------- группы тегов ---------- */
+const DEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
+function ppsText(g) { const p = Number(g.count) / Number(g.period); return Number.isFinite(p) && p > 0 ? nfa(p) : '—'; }
+function renderGroups() {
+  $('groups').innerHTML = S.groups.map((g, i) => `<tr data-i="${i}">
+    <td><select aria-label="Тип, группа ${i + 1}" data-g="type">${E.TYPE_ORDER.map(t => `<option ${t === g.type ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+    <td><input type="number" min="0" step="1" aria-label="Тегов, группа ${i + 1}" data-g="count" value="${esc(g.count)}"></td>
+    <td><input type="number" min="0.1" step="any" aria-label="Период, с, группа ${i + 1}" data-g="period" value="${esc(g.period)}"></td>
+    <td class="pps">${ppsText(g)}</td>
+    <td><button class="icon-btn" type="button" data-del="${i}" aria-label="Удалить группу ${i + 1}">${DEL}</button></td></tr>`).join('');
+}
+$('groups').addEventListener('input', e => {
+  const el = e.target, tr = el.closest('tr'); if (!tr || !el.dataset.g) return;
+  const g = S.groups[+tr.dataset.i];
+  if (el.dataset.g === 'type') g.type = el.value; else { const v = parseFloat(el.value); if (!Number.isFinite(v)) return; g[el.dataset.g] = v; }
+  tr.querySelector('.pps').textContent = ppsText(g);
+  S.topo = null; schedule(200);
+});
+$('groups').addEventListener('change', e => { if (e.target.dataset.g === 'type') { S.groups[+e.target.closest('tr').dataset.i].type = e.target.value; schedule(0); } });
+$('groups').addEventListener('click', e => {
+  const b = e.target.closest('[data-del]'); if (!b) return;
+  if (S.groups.length <= 1) { toast('Нужна хотя бы одна группа тегов'); return; }
+  S.groups.splice(+b.dataset.del, 1); S.topo = null; renderGroups(); schedule(0);
+});
+$('add-group').addEventListener('click', () => {
+  S.groups.push({ type: 'DOUBLE', count: 1000, period: 5 }); renderGroups(); schedule(0);
+  const rows = $('groups').querySelectorAll('tr'); rows[rows.length - 1].querySelector('input').focus();
+});
+$('preset').addEventListener('change', e => {
+  const p = E.PRESETS[e.target.value]; if (!p) return;
+  S.groups = clone(p.groups); S.topo = null; renderGroups(); schedule(0); e.target.value = '';
+  toast('Загружен пример: ' + p.label);
+});
+
+/* ---------- вкладки и вариант ---------- */
+document.querySelectorAll('[name=variant]').forEach(r => r.addEventListener('change', () => { VAR = r.value; renderPanes(); }));
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => selectTab(t.id.slice(4))));
+document.querySelector('.tabs').addEventListener('keydown', e => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  const tabs = [...document.querySelectorAll('.tab')].filter(t => !t.hidden);
+  let i = tabs.indexOf(document.activeElement);
+  if (i < 0) i = tabs.findIndex(t => t.getAttribute('aria-selected') === 'true');
+  const n = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]; selectTab(n.id.slice(4)); n.focus();
+});
+function selectTab(id) {
+  TAB = id;
+  document.querySelectorAll('.tab').forEach(t => { const on = t.id === 'tab-' + id; t.setAttribute('aria-selected', on); t.tabIndex = on ? 0 : -1; });
+  document.querySelectorAll('.results > .pane').forEach(p => p.hidden = p.id !== 'pane-' + id);
+}
+
+/* ---------- расчёт ---------- */
+function schedule(ms) { clearTimeout(timer); timer = setTimeout(run, ms); }
+function run() {
+  R = E.compute(S);
+  persist();
+  try { history.replaceState(null, '', '#s=' + toHash(S)); } catch (e) { }
+  renderTotals(); renderHints();
+  if (R.empty) {
+    ['sum', 'disk', 'ft', 'cfg', 'met'].forEach(id => $('pane-' + id).innerHTML = '<div class="empty">Добавьте хотя бы одну группу тегов с количеством и периодом больше нуля.</div>');
+    $('repBox').innerHTML = ''; return;
+  }
+  renderRep();
+  renderPanes();
+}
+function renderTotals() {
+  if (R.empty) { $('totals').innerHTML = '<span>Нет данных</span>'; return; }
+  $('totals').innerHTML = `<span>Тегов: <b>${nf(R.tags)}</b></span><span>Поток: <b>${nf(R.P)}</b> точек/с</span><span>В сутки: <b>${nf(R.P * 86400 / 1e6, 1)}</b> млн точек</span>`;
+}
+function renderHints() {
+  const ms = Number(S.partMs);
+  $('partHint').innerHTML = ms > 0 ? `Окно партиции тега ${nf(ms / 86400000, 1)} сут, например <code>m50010.1792050000000</code>.` : '';
+  const u = E.USAGE[S.usage];
+  $('usageHint').textContent = u ? `На пользователя: ${u.trOpen} ${plural(u.trOpen, 'тренд', 'тренда', 'трендов')} в час по ${u.trTags} тегов за ${u.trWin} ч, мнемосхема ${u.mnTags} тегов раз в ${nf(u.mnRef, 1)} с, ${nf(u.repH, 2)} ${Number.isInteger(u.repH) ? plural(u.repH, 'отчёт', 'отчёта', 'отчётов') : 'отчёта'} в час за ${u.repDays} ${plural(u.repDays, 'сутки', 'суток', 'суток')}.` : 'Задайте профиль одного пользователя.';
+  if (!R.empty) {
+    const v = R.variants[VAR] || R.variants.rec;
+    $('compHint').textContent = `LZ4: ${nf(v.lz4.day / (R.P * 86400), 1)} Б на точку, без сжатия: ${nf(v.none.day / (R.P * 86400), 1)} Б (${VN[VAR].toLowerCase()}).`;
+  }
+}
+function renderRep() {
+  const rep = R.rep, box = $('repBox');
+  if (R.standalone) { box.innerHTML = ''; box.hidden = true; return; }
+  box.hidden = false;
+  const tolW = Math.max(0, R.tol.w), tolR = Math.max(0, R.tol.r);
+  const bad = R.checks.some(c => c.scope === 'Отказоустойчивость' && c.sev === 'crit');
+  box.className = 'rep-box ' + (bad ? 'bad' : R.consistent === false ? 'mid' : 'good');
+  const rfs = [...new Set(rep.dcs.map(d => d.rf))];
+  box.innerHTML = `<div class="rb-h">RF ${rfs.join('/')}${rep.dcs.length > 1 ? ' в каждом ДЦ' : ''} · запись ${rep.wcl} · чтение ${rep.rcl}</div>
+    <div>Выдерживает отказ ${Math.min(tolW, tolR)} ${plural(Math.min(tolW, tolR), 'ноды', 'нод', 'нод')} без остановки записи и чтения.${R.consistent ? ' Тренды всегда видят последнюю точку.' : R.consistent === false ? ' Тренды могут кратко не видеть последнюю точку.' : ''}</div>`;
+}
+
+function renderPanes() {
+  CODE.length = 0;
+  $('var-' + VAR).checked = true;
+  const v = R.variants[VAR];
+  FTR = FT.compute(E.ftState(R, v.topo));
+  $('pane-sum').innerHTML = paneSum();
+  $('pane-disk').innerHTML = paneDisk();
+  $('pane-ft').innerHTML = paneFt();
+  $('pane-cfg').innerHTML = paneCfg();
+  const calBusy = $('pane-cal').contains(document.activeElement) && document.activeElement !== document.body && $('cal-result');
+  if (calBusy) $('cal-result').innerHTML = calResult(); else $('pane-cal').innerHTML = paneCal();
+  $('pane-met').innerHTML = paneMet();
+  renderSchemeStatus();
+  renderCmp();
+  renderHints();
+  const nc = R.checks.filter(c => c.sev === 'crit').length;
+  $('cal-badge').innerHTML = R.calib.valid && R.calib.on ? '<span class="badge n">вкл</span>' : '';
+  probTask = null; probToken++;
+  const det = $('prob-det'); if (det && det.open) startProb();
+}
+
+/* ---------- Итог ---------- */
+function drivesStr(n) {
+  const d = n.data.drives;
+  if (!d.n) return 'не помещается в выбранный RAID';
+  const raid = d.n === 1 && ['raid0', 'none', 'jbod'].includes(n.data.raid) ? 'один диск' : E.RAIDS[n.data.raid].label;
+  return `${d.n} × ${dsz(d.size)} ${E.DISK[n.data.disk].label}, ${raid}`;
+}
+function attnList(max) {
+  const list = R.checks.filter(c => c.sev === 'crit' || c.sev === 'warn').sort((a, b) => (a.sev === 'crit' ? 0 : 1) - (b.sev === 'crit' ? 0 : 1));
+  return list.slice(0, max);
+}
+function paneSum() {
+  const v = R.variants[VAR], n = v.node, ch = v.chosen, rep = R.rep;
+  const D = rep.dcs.length;
+  const N = v.Ntotal;
+  const unit = R.standalone ? 'сервер, одна нода' : (D > 1 ? `${plural(N, 'нода', 'ноды', 'нод')}: ${v.dcs.map((d, i) => rep.dcs[i].name + ' ' + d.N).join(', ')}` : plural(N, 'нода', 'ноды', 'нод'));
+  const tol = R.standalone ? 'Без резервирования' : `Выдерживает отказ ${Math.max(0, Math.min(R.tol.w, R.tol.r))} ${plural(Math.max(0, Math.min(R.tol.w, R.tol.r)), 'ноды', 'нод', 'нод')}`;
+  const rfs = [...new Set(rep.dcs.map(d => d.rf))].join('/');
+  let h = `<div class="verdict">
+    <div><div class="v-num">${N}</div><div class="v-unit">${esc(unit)}</div></div>
+    <div class="v-spec">
+      <div class="line">${ch.p.c} ${plural(ch.p.c, 'ядро', 'ядра', 'ядер')} · ${ch.p.ram} ГБ RAM на ноду</div>
+      <div class="line">Data: ${esc(drivesStr(n))}</div>
+      <div class="line">Commitlog: ${dsz(n.commitlog.drive)} SSD · ОС: 2 × ${dsz(n.os.drive)} RAID 1</div>
+      <div class="chips"><span class="chip">RF ${rfs}</span><span class="chip">${rep.wcl === rep.rcl ? esc(rep.wcl) : 'запись ' + esc(rep.wcl) + ' · чтение ' + esc(rep.rcl)}</span><span class="chip lime">${tol}</span><span class="chip">${S.comp === 'none' ? 'Без сжатия' : 'LZ4'}</span>${R.calib.valid && R.calib.on ? '<span class="chip">Откалибровано</span>' : ''}</div>
+    </div></div>`;
+  const dataAll = (v.L + v.snapT) * rep.dcs.reduce((a, d) => a + d.rf, 0);
+  const bpp = v.compDay / (R.P * 86400);
+  h += `<div class="kpis">
+    <div class="kpi"><span class="k">Поток записи</span><span class="v">${nf(R.P)}</span><span class="d">точек/с; через ${R.Y} ${plural(R.Y, 'год', 'года', 'лет')} ${nf(R.P * R.Gf)}</span></div>
+    <div class="kpi"><span class="k">Данные с репликами</span><span class="v">${fB(dataAll)}</span><span class="d">на горизонте ${R.Y} ${plural(R.Y, 'год', 'года', 'лет')}${D > 1 ? ', все ДЦ' : ''}</span></div>
+    <div class="kpi"><span class="k">Data-диск на ноду</span><span class="v">${fB(n.reqData)}</span><span class="d">заполнять не выше ${pct(n.fillLimit * 100)}</span></div>
+    <div class="kpi"><span class="k">Байт на точку</span><span class="v">${nf(bpp, 1)}</span><span class="d">${S.comp === 'none' ? 'без сжатия; с LZ4 ' + nf(v.lz4.day / (R.P * 86400), 1) : 'LZ4; без сжатия ' + nf(v.none.day / (R.P * 86400), 1)}</span></div>
+  </div>`;
+  const att = attnList(4), total = R.checks.filter(c => c.sev === 'crit' || c.sev === 'warn').length;
+  if (att.length) {
+    h += `<div class="block"><h3>Что учесть</h3><div class="attn">${att.map(c => `<div class="attn-i ${c.sev}"><span class="ic" aria-hidden="true">!</span><div><b>${esc(c.title)}.</b> ${esc(c.fix || c.text)}</div></div>`).join('')}</div>
+    ${total > att.length || R.checks.length > att.length ? `<details class="more"><summary>Все проверки (${R.checks.length})</summary><div class="more-body">${checksHtml()}</div></details>` : ''}</div>`;
+  }
+  const cols = ['cur', 'rec', 'unset'];
+  const row = (label, f, note) => `<tr><th scope="row">${label}${note ? `<br><small class="muted">${note}</small>` : ''}</th>${cols.map(k => `<td class="r${k === VAR ? ' sel' : ''}">${f(R.variants[k])}</td>`).join('')}</tr>`;
+  h += `<div class="block"><h3>Текущая схема и рекомендации</h3><div class="tbl-wrap"><table class="t cmp3"><thead><tr><th></th>${cols.map(k => `<th class="r${k === VAR ? ' sel' : ''}">${esc(VN[k])}</th>`).join('')}</tr></thead><tbody>
+    ${row('Байт на точку, LZ4', x => nf(x.lz4.day / (R.P * 86400), 1))}
+    ${row('Байт на точку без сжатия', x => nf(x.none.day / (R.P * 86400), 1))}
+    ${row('Данные одной копии', x => fB(x.L), 'на горизонте')}
+    ${row('Нод', x => nf(x.Ntotal))}
+    ${row('Data-диск на ноду', x => fB(x.node.reqData))}
+  </tbody></table></div>
+  <p class="hint">Рекомендации не требуют доработки MES: TTL таблицы вместо DELETE, окно TWCS ${R.Wrec} ${plural(R.Wrec, 'сутки', 'суток', 'суток')}, incremental_backups выключен. TTL добавляет к точке несколько байт, зато старые данные удаляются вовремя. Доработка драйвера C#: Unset.Value вместо null, без 5 tombstone-ячеек на точку.</p></div>`;
+  if (!v.own && !R.standalone) {
+    h += `<details class="more"><summary>Другие конфигурации ноды</summary><div class="more-body"><div class="tbl-wrap"><table class="t"><thead><tr><th>Нода</th><th class="r">Нод</th><th>Число нод определяет</th><th class="r">CPU в пике</th><th class="r">RAM нужно</th></tr></thead><tbody>
+    ${v.cands.map(c => `<tr class="click ${c === ch ? 'sel' : ''}" data-prof="${c.p.id}" tabindex="0"><th scope="row">${c.p.c} ядер · ${c.p.ram} ГБ ${c === ch ? '<span class="tag ok">выбрано</span>' : ''}</th><td class="r">${nf(c.Ntot)}</td><td>${esc(c.limits.join(', ') || '—')}</td><td class="r">${pct(c.node.cpu.peakUtil)}</td><td class="r">${nf(c.node.ram.need)} из ${c.p.ram} ГБ</td></tr>`).join('')}
+    </tbody></table></div>${S.profileOverride ? '<div><button class="btn ghost" type="button" data-prof-auto>Вернуть автоматический выбор</button></div>' : ''}
+    <p class="hint">Автовыбор минимизирует суммарные ядра и RAM. Щёлкните строку, чтобы выбрать вручную.</p></div></details>`;
+  }
+  return h;
+}
+function checksHtml() {
+  const order = { crit: 0, warn: 1, info: 2, ok: 3 }, icon = { crit: '!', warn: '!', info: 'i', ok: '✓' };
+  return '<div class="checks">' + R.checks.slice().sort((a, b) => order[a.sev] - order[b.sev]).map(c => `<div class="chk ${c.sev}"><span class="ic" aria-hidden="true">${icon[c.sev]}</span><div class="tt">${esc(c.title)}<small>${esc(c.scope)}</small></div><p>${esc(c.text)}</p>${c.fix ? `<p class="fix"><b>Что сделать:</b> ${esc(c.fix)}</p>` : ''}</div>`).join('') + '</div>';
+}
+document.addEventListener('click', e => {
+  const tr = e.target.closest('[data-prof]');
+  if (tr) { S.profileOverride = tr.dataset.prof; S.topo = null; schedule(0); return; }
+  if (e.target.closest('[data-prof-auto]')) { S.profileOverride = null; schedule(0); return; }
+  const cp = e.target.closest('[data-copy]'); if (cp) { copyCode(+cp.dataset.copy, cp); return; }
+  const dl = e.target.closest('[data-dl]'); if (dl) { const f = CODE[+dl.dataset.dl]; saveFile(f.file, new Blob([f.text], { type: 'text/plain;charset=utf-8' })); return; }
+  const cd = e.target.closest('[data-cmp-del]'); if (cd) { CMP.splice(+cd.dataset.cmpDel, 1); saveCmp(); renderCmp(); return; }
+  if (e.target.closest('[data-cmp-clear]')) { CMP = []; saveCmp(); renderCmp(); selectTab('sum'); return; }
+  const cl = e.target.closest('[data-cmp-load]'); if (cl) { const it = CMP[+cl.dataset.cmpLoad]; if (it) { setState(it.s); selectTab('sum'); toast('Сценарий загружен'); } return; }
+});
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('[data-prof]')) { S.profileOverride = e.target.dataset.prof; schedule(0); } });
+
+/* ---------- Диски ---------- */
+function paneDisk() {
+  const v = R.variants[VAR], n = v.node, d = n.data.drives, rep = R.rep;
+  const usable = (d.usable || 0) * 1e12, fsRes = n.reqData * E.M.fsReserve;
+  const segs = [
+    ['Данные', n.live, 'var(--seg-live)', 'Срок хранения × поток × RF / число нод'],
+    ['Запас compaction', n.head, 'var(--seg-head)', 'Не меньше двух окон TWCS или 10 % данных'],
+    ['Repair и streaming', n.repair, 'var(--seg-repair)', '10 % данных'],
+    ['Резерв snapshot', n.snapRes, 'var(--seg-snap)', '5 % данных под nodetool snapshot'],
+    ['Snapshot после TRUNCATE', n.autoSnap, 'var(--seg-auto)', 'Копия таблицы до nodetool clearsnapshot'],
+    ['Hints', n.hints, 'var(--seg-hints)', '3 ч записи на отказавшие ноды'],
+    ['incremental backups', n.backups, 'var(--seg-back)', v.v.backups === 'on_nocleanup' ? 'Не чистится, копится весь горизонт' : 'До очистки'],
+    ['Резерв ФС', fsRes, 'var(--seg-fs)', '5 % свободного места XFS']
+  ].filter(x => x[1] > 0);
+  const total = Math.max(usable, n.reqData), free = Math.max(0, usable - n.reqData);
+  const bar = segs.map(x => `<i style="width:${(x[1] / total * 100).toFixed(3)}%;background:${x[2]}" title="${esc(x[0])}: ${fB(x[1])}"></i>`).join('');
+  let h = `<div class="disk-cards">
+    <div class="dcard"><span class="role">ОС и логи</span><span class="big">2 × ${dsz(n.os.drive)}</span><span>RAID 1</span><span class="hint">ОС, логи, heap dump ${n.ram.heap} ГБ</span></div>
+    <div class="dcard"><span class="role">Commitlog</span><span class="big">${dsz(n.commitlog.drive)}</span><span>Отдельный SSD${R.standalone ? ', лучше RAID 1' : ''}</span><span class="hint">commitlog_total_space ${n.commitlog.totalMiB} MiB</span></div>
+    <div class="dcard main"><span class="role">Data, hints, saved_caches</span><span class="big">${d.n ? `${d.n} × ${dsz(d.size)}` : '—'}</span><span>${esc(drivesStr(n))}</span><span class="hint">Нужно ${fB(n.reqData)}, полезно ${d.n ? fTB(d.usable) : '—'}</span></div>
+  </div>
+  <div class="block"><h3>Состав data-диска одной ноды</h3>
+    <div class="stack" role="img" aria-label="Состав data-диска">${bar}</div>
+    <div class="legend">${segs.map(x => `<span><i style="background:${x[2]}"></i>${esc(x[0])} ${fB(x[1])}</span>`).join('')}${free > 0 ? `<span><i style="background:var(--surface-2);border:1px solid var(--line-strong)"></i>Свободно ${fB(free)}</span>` : ''}</div>
+    <div class="tbl-wrap"><table class="t"><thead><tr><th>Компонент</th><th class="r">На ноду</th><th>Как считается</th></tr></thead><tbody>
+    ${segs.map(x => `<tr><th scope="row">${esc(x[0])}</th><td class="r">${fB(x[1])}</td><td>${esc(x[3])}</td></tr>`).join('')}
+    <tr><th scope="row">Итого</th><td class="r"><b>${fB(n.reqData)}</b></td><td>Заполнение данными не выше ${pct(n.fillLimit * 100)}</td></tr>
+    </tbody></table></div></div>`;
+  const kTot = rep.dcs.reduce((a, x) => a + x.rf, 0);
+  const dataFor = day => (v.cleanup === 'ttl' || v.v.cleanup === 'ttl' ? day * R.Gf * (R.ret + v.v.W + v.v.gcSec / 86400) : day / v.compDay * v.L);
+  const lz4L = dataFor(v.lz4.day), noneL = dataFor(v.none.day);
+  h += `<div class="split">
+    <div class="block"><h3>LZ4 и без сжатия</h3><div class="tbl-wrap"><table class="t"><thead><tr><th></th><th class="r">LZ4</th><th class="r">Без сжатия</th></tr></thead><tbody>
+      <tr><th scope="row">Байт на точку</th><td class="r">${nf(v.lz4.day / (R.P * 86400), 1)}</td><td class="r">${nf(v.none.day / (R.P * 86400), 1)}</td></tr>
+      <tr><th scope="row">Данные в сутки, 1 копия</th><td class="r">${fB(v.lz4.day * R.Gf)}</td><td class="r">${fB(v.none.day * R.Gf)}</td></tr>
+      <tr><th scope="row">Данные с репликами</th><td class="r">${fB(lz4L * kTot)}</td><td class="r">${fB(noneL * kTot)}</td></tr>
+    </tbody></table></div><p class="hint">LZ4 почти не нагружает CPU и уменьшает объём и чтение с диска. Без сжатия имеет смысл только при нехватке CPU.</p></div>
+    <div class="block"><h3>${R.standalone ? 'Сервер' : 'Весь кластер'}</h3><div class="tbl-wrap"><table class="t"><tbody>
+      <tr><th scope="row">Нод</th><td class="r">${nf(v.Ntotal)}</td></tr>
+      <tr><th scope="row">Data-накопителей</th><td class="r">${d.n ? nf(d.n * v.Ntotal) + ' × ' + dsz(d.size) : '—'}</td></tr>
+      <tr><th scope="row">Полезная ёмкость data</th><td class="r">${d.n ? fTB(d.usable * v.Ntotal) : '—'}</td></tr>
+      <tr><th scope="row">Commitlog</th><td class="r">${nf(v.Ntotal)} × ${dsz(n.commitlog.drive)}</td></tr>
+      <tr><th scope="row">ОС</th><td class="r">${nf(v.Ntotal * 2)} × ${dsz(n.os.drive)}</td></tr>
+    </tbody></table></div></div></div>
+  <p class="hint">Ёмкость в десятичных ТБ, как у производителей. Расчёт на конец горизонта ${R.Y} ${plural(R.Y, 'год', 'года', 'лет')} с ростом ${nf(S.growth)} %/год. ${esc(v.Lnote)}.</p>`;
+  return h;
+}
+
+/* ---------- Отказоустойчивость ---------- */
+function stepper(attrs, val, min, max, label) {
+  return `<span class="stepper"><button type="button" data-st="dec" ${attrs} aria-label="Уменьшить: ${esc(label)}">−</button><input type="number" min="${min}" max="${max}" value="${val}" data-st="set" ${attrs} aria-label="${esc(label)}"><button type="button" data-st="inc" ${attrs} aria-label="Увеличить: ${esc(label)}">+</button></span>`;
+}
+function paneFt() {
+  const o = FTR, T = o.T, v = R.variants[VAR];
+  if (o.errors && o.errors.length) return '<div class="chk crit"><span class="ic">!</span><div class="tt">Схема не считается</div><p>' + o.errors.map(esc).join('<br>') + '</p></div>';
+  const D = T.dcs.length;
+  const sig = T.nodes.map(n => n.name).join(',');
+  if (sig !== failSig || !failed || failed.length !== T.N) { failed = new Uint8Array(T.N); failSig = sig; }
+  const appTol = o.appTol, rt = o.rackTol[0], dc0 = T.dcs[0];
+  const appR = Math.min(rt.w, rt.r, rt.s == null ? Infinity : rt.s);
+  const cards = [];
+  cards.push(`<div class="kpi"><span class="k">Отказ любых нод без остановки</span><span class="v ${appTol > 0 ? 'ok' : 'bad'}">${appTol < 0 ? 'нет' : appTol}</span><span class="d">Запись ${o.st.wcl}: ${Math.max(0, o.wTol)}, чтение ${o.st.rcl}: ${Math.max(0, o.rTol)}. Худший случай: отказали ноды с репликами одних и тех же данных.</span></div>`);
+  cards.push(`<div class="kpi"><span class="k">Отказ стоек (racks)</span><span class="v ${dc0.K === 1 ? 'mid' : appR > 0 ? 'ok' : 'bad'}">${dc0.K === 1 ? '1 rack' : appR + ' из ' + dc0.K}</span><span class="d">${dc0.K === 1 ? 'Все ноды в одной стойке: её отказ останавливает ДЦ.' : 'Сколько стоек ' + esc(dc0.name) + ' может отказать без остановки MES.'}</span></div>`);
+  cards.push(`<div class="kpi"><span class="k">Тренды и последняя точка</span><span class="v ${o.consistent ? 'ok' : 'mid'}">${o.consistent ? 'Всегда видна' : o.consistent === false ? 'С задержкой' : '—'}</span><span class="d">${o.consistent ? 'Чтение всегда застаёт реплику с последней записью.' : 'Чтение может вернуть старое значение до завершения репликации.'}</span></div>`);
+  if (D > 1) {
+    const okN = o.dcFail.filter(r => r.cells.every(c => !c || (c.w && c.r))).length;
+    cards.push(`<div class="kpi"><span class="k">Отказ целого ДЦ</span><span class="v ${okN === D ? 'ok' : okN ? 'mid' : 'bad'}">${okN} из ${D}</span><span class="d">При отказе любого из ${okN} ДЦ остальные продолжают работу.</span></div>`);
+  }
+  let h = `<div class="kpis">${cards.join('')}</div>`;
+  const manual = v.dcs.some(d => d.manual);
+  h += `<div class="block"><div class="topo-h"><h3>Схема кластера <small>нажмите на ноду, стойку или ДЦ, чтобы смоделировать отказ</small></h3>
+    <div class="row-actions" style="gap:8px">${manual ? '<button class="btn" type="button" data-topo="reset">Вернуть рекомендованную</button>' : ''}<button class="btn ghost" type="button" data-sact="clear">Все ноды в строй</button></div></div>
+    <div class="topo">${T.dcs.map((dc, d) => `<div class="topo-dc"><div class="topo-h"><b><button class="rack-l" type="button" data-sact="dc" data-dc="${d}" style="font-size:15px;color:var(--ink)">${esc(dc.name)}</button></b><span class="muted">RF ${dc.rf} · ${dc.N} ${plural(dc.N, 'нода', 'ноды', 'нод')} · ${dc.K} ${plural(dc.K, 'стойка', 'стойки', 'стоек')}</span>
+      <span class="row-actions" style="gap:6px"><button class="btn" type="button" data-topo="addRack" data-dc="${d}" ${dc.K >= 12 ? 'disabled' : ''}>+ стойка</button>${dc.K > 1 ? `<button class="btn" type="button" data-topo="delRack" data-dc="${d}">− стойка</button>` : ''}</span></div>
+      <div class="topo-racks">${dc.racks.map((r, ri) => `<div class="rack"><button class="rack-l" type="button" data-sact="rack" data-rack="${r.gidx}">${r.name}</button>
+        <div class="nodes">${r.nodes.map((id, i) => `<button type="button" class="nd${failed[id] ? ' down' : ''}" data-sact="node" data-node="${id}" title="${esc(T.nodes[id].name)}: ${FT.pct(o.ring.own[id])} данных" aria-pressed="${failed[id] ? 'true' : 'false'}" aria-label="${esc(T.nodes[id].name)}">${i + 1}</button>`).join('')}</div>
+        ${stepper(`data-dc="${d}" data-rack="${ri}"`, r.n, 1, 100, 'нод в ' + r.name + ' ' + dc.name)}</div>`).join('')}</div></div>`).join('')}</div>
+    <div id="schemeStatus"></div>
+    <p class="hint">Изменение числа нод и стоек пересчитывает диски и ресурсы по самой загруженной ноде.</p></div>`;
+  const warns = o.warnings.filter(w => w.level !== 'info' || /racks|rack/.test(w.text)).slice(0, 4);
+  if (warns.length) h += `<div class="attn">${warns.map(w => `<div class="attn-i ${w.level === 'err' ? 'crit' : 'warn'}"><span class="ic" aria-hidden="true">${w.level === 'info' ? 'i' : '!'}</span><div>${esc(w.text)}</div></div>`).join('')}</div>`;
+  h += `<details class="more" id="prob-det"><summary>Вероятность при случайном отказе нескольких нод</summary><div class="more-body"><p class="hint">Ноды отказывают случайно. P: вероятность, что часть данных станет недоступна. С vnodes почти любые две ноды из разных стоек делят какой-то диапазон.</p><div class="chart" id="probChart"></div><div class="tbl-wrap"><table class="t" id="probTable"></table></div><p class="hint" id="probProg"></p></div></details>`;
+  if (D > 1) {
+    h += `<details class="more"><summary>Отказ целого ДЦ подробно</summary><div class="more-body"><div class="tbl-wrap"><table class="t"><thead><tr><th>Отказал</th>${T.dcs.map(dc => `<th>MES в ${esc(dc.name)}</th>`).join('')}</tr></thead><tbody>
+    ${o.dcFail.map(row => `<tr><th scope="row">${esc(T.dcs[row.dc].name)}</th>${row.cells.map(c => c ? `<td><span class="pill ${c.w ? 'ok' : 'bad'}">запись ${c.w ? 'да' : 'нет'}</span> <span class="pill ${c.r ? 'ok' : 'bad'}">чтение ${c.r ? 'да' : 'нет'}</span></td>` : '<td><span class="pill na">недоступен</span></td>').join('')}</tr>`).join('')}
+    </tbody></table></div></div></details>`;
+  }
+  return h;
+}
+function renderSchemeStatus() {
+  const box = $('schemeStatus'); if (!box || !FTR || FTR.errors.length) return;
+  const o = FTR, T = o.T;
+  const nDown = failed.reduce((a, b) => a + b, 0);
+  if (!nDown) { box.innerHTML = '<p class="hint">Все ноды работают.</p>'; return; }
+  const ev = FT.evalFailures(T, o.ring, failed, o.W, o.R, o.S);
+  const item = (t, frac) => { const bad = frac > 1e-12; return `<div class="ft-st"><span class="t">${t}</span><span class="x ${bad ? 'bad-t' : 'ok-t'}">${bad ? 'недоступно ' + FT.pct(frac) + ' данных' : 'работает'}</span></div>`; };
+  box.innerHTML = `<div class="ft-status"><div class="ft-st"><span class="t">Отказало</span><span class="x">${nDown} из ${T.N}</span></div>${item('Запись · ' + o.st.wcl, ev.w)}${item('Чтение · ' + o.st.rcl, ev.r)}
+    <div class="ft-st"><span class="t">Сохранность</span><span class="x ${ev.loss > 1e-12 ? 'bad-t' : 'ok-t'}">${ev.loss > 1e-12 ? 'все копии ' + FT.pct(ev.loss) + ' данных на отказавших нодах' : 'копии всех данных живы'}</span></div></div>`;
+}
+$('pane-ft').addEventListener('click', e => {
+  const t = e.target.closest('[data-topo],[data-st],[data-sact]'); if (!t || !FTR) return;
+  if (t.dataset.sact) {
+    const a = t.dataset.sact, T = FTR.T;
+    if (a === 'node') { const id = +t.dataset.node; failed[id] ^= 1; t.classList.toggle('down', !!failed[id]); t.setAttribute('aria-pressed', failed[id] ? 'true' : 'false'); renderSchemeStatus(); return; }
+    let ids = [];
+    if (a === 'rack') ids = T.racks[+t.dataset.rack].nodes; else if (a === 'dc') ids = T.dcs[+t.dataset.dc].nodes;
+    if (a === 'clear') failed.fill(0); else { const all = ids.every(id => failed[id]); ids.forEach(id => { failed[id] = all ? 0 : 1; }); }
+    T.nodes.forEach(nd => { const b = document.querySelector(`.nd[data-node="${nd.id}"]`); if (b) { b.classList.toggle('down', !!failed[nd.id]); b.setAttribute('aria-pressed', failed[nd.id] ? 'true' : 'false'); } });
+    renderSchemeStatus(); return;
+  }
+  if (t.dataset.topo === 'reset') { S.topo = null; schedule(0); return; }
+  if (t.tagName === 'INPUT') return;
+  const topo = S.topo ? clone(S.topo) : clone(R.variants[VAR].topo);
+  const d = +t.dataset.dc;
+  if (t.dataset.topo === 'addRack') topo[d].racks.push(1);
+  else if (t.dataset.topo === 'delRack') { if (topo[d].racks.length > 1) topo[d].racks.pop(); }
+  else if (t.dataset.st) { const r = +t.dataset.rack; topo[d].racks[r] = Math.max(1, Math.min(100, topo[d].racks[r] + (t.dataset.st === 'inc' ? 1 : -1))); }
+  S.topo = topo; schedule(0);
+});
+$('pane-ft').addEventListener('change', e => {
+  const t = e.target; if (t.dataset.st !== 'set') return;
+  const topo = S.topo ? clone(S.topo) : clone(R.variants[VAR].topo);
+  topo[+t.dataset.dc].racks[+t.dataset.rack] = Math.max(1, Math.min(100, Math.round(+t.value || 1)));
+  S.topo = topo; schedule(0);
+});
+$('pane-ft').addEventListener('toggle', e => { if (e.target.id === 'prob-det' && e.target.open && !probTask) startProb(); }, true);
+function startProb() {
+  if (!FTR || FTR.errors.length) return;
+  const my = ++probToken;
+  probTask = FT.makeProbTask(FTR.T, FTR.ring, FTR.W, FTR.R, FTR.S, { kMax: Math.min(FTR.T.N, 8), seed: S.seed || 1 });
+  const tick = () => { if (my !== probToken) return; const done = probTask.step(30); renderProb(); if (!done) setTimeout(tick, 0); };
+  renderProb(); setTimeout(tick, 10);
+}
+function renderProb() {
+  const chart = $('probChart'); if (!chart || !probTask) return;
+  const rs = probTask.results, kMax = probTask.kMax;
+  const series = [{ key: 'pW', name: 'Запись ' + FTR.st.wcl, col: 'var(--brand)', w: 3 }, { key: 'pR', name: 'Чтение ' + FTR.st.rcl, col: 'var(--info)', w: 2 }, { key: 'pL', name: 'Потеря всех копий', col: 'var(--crit)', w: 2, dash: true }];
+  const W = 640, H = 220, L = 44, Rr = 12, Tp = 10, B = 30, iw = W - L - Rr, ih = H - Tp - B;
+  const x = k => L + (kMax <= 1 ? iw / 2 : (k - 1) / (kMax - 1) * iw), y = p => Tp + (1 - p) * ih;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:720px;display:block" role="img" aria-label="Вероятность недоступности при отказе k нод">`;
+  [0, .25, .5, .75, 1].forEach(p => { svg += `<line x1="${L}" x2="${W - Rr}" y1="${y(p)}" y2="${y(p)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(p) + 4}" font-size="11" text-anchor="end">${p * 100}%</text>`; });
+  for (let k = 1; k <= kMax; k++) svg += `<text x="${x(k)}" y="${H - 10}" font-size="11" text-anchor="middle">${k}</text>`;
+  series.forEach(s => { if (!rs.length) return; const pts = rs.map(r => [x(r.k), y(r[s.key])]); svg += `<polyline fill="none" stroke="${s.col}" stroke-width="${s.w}" ${s.dash ? 'stroke-dasharray="5 4"' : ''} points="${pts.map(p => p.join(',')).join(' ')}"/>`; rs.forEach((r, i) => { svg += `<circle cx="${pts[i][0]}" cy="${pts[i][1]}" r="3" fill="var(--surface)" stroke="${s.col}" stroke-width="2"><title>${esc(s.name)}, ${r.k} нод: ${FT.pct(r[s.key])}</title></circle>`; }); });
+  chart.innerHTML = svg + '</svg><div class="legend">' + series.map(s => `<span><i style="background:${s.col}"></i>${esc(s.name)}</span>`).join('') + '</div>';
+  $('probTable').innerHTML = `<thead><tr><th class="r">Отказало нод</th>${series.map(s => `<th class="r">${esc(s.name)}</th>`).join('')}</tr></thead><tbody>${rs.map(r => `<tr><td class="r">${r.k}</td>${series.map(s => `<td class="r ${r[s.key] > 0.5 ? 'bad-t' : r[s.key] > 0 ? 'mid-t' : 'ok-t'}">${FT.pct(r[s.key])}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  $('probProg').textContent = probTask.done() ? (rs.every(r => r.exact) ? 'Перебор всех сочетаний.' : 'Оценка методом Монте-Карло, где сочетаний слишком много.') : 'Считаю…';
+}
+
+/* ---------- Конфигурация ---------- */
+function hl(text) {
+  return esc(text).split('\n').map(l => {
+    if (/^\s*(#|--|\/\/)/.test(l)) return `<span class="c">${l}</span>`;
+    const m = l.match(/^(\s*[\w.\-]+)(:)(.*)$/);
+    if (m && !/^\s*-/.test(l)) return `<span class="k">${m[1]}</span>${m[2]}${m[3].replace(/(\s#.*)$/, '<span class="c">$1</span>')}`;
+    return l.replace(/(\s(--|\/\/)\s.*)$/, '<span class="c">$1</span>');
+  }).join('\n');
+}
+function codeBlock(f) {
+  const i = CODE.push(f) - 1;
+  return `<div class="code"><div class="code-h"><div><b>${esc(f.file)}</b> <span>${esc(f.title)}</span></div><div style="display:flex;gap:6px"><button class="copy" type="button" data-copy="${i}">Копировать</button><button class="copy" type="button" data-dl="${i}">Скачать</button></div></div><pre>${hl(f.text)}</pre></div>`;
+}
+async function copyCode(i, btn) {
+  const t = CODE[i] && CODE[i].text; if (t == null) return;
+  try { await navigator.clipboard.writeText(t); btn.textContent = 'Скопировано'; setTimeout(() => btn.textContent = 'Копировать', 1600); }
+  catch (e) { const pre = btn.closest('.code').querySelector('pre'); const r = document.createRange(); r.selectNodeContents(pre); const s = getSelection(); s.removeAllRanges(); s.addRange(r); toast('Текст выделен, нажмите Ctrl+C'); }
+}
+function paneCfg() {
+  const v = R.variants[VAR], files = E.configs(R, v);
+  return `<p class="hint">Вариант «${esc(VN[VAR])}», нода ${v.chosen.p.c} ядер / ${v.chosen.p.ram} ГБ. Остальные параметры cassandra.yaml берутся из <code>cassandra_latest.yaml</code> релиза ${E.CASSANDRA_VERSION}.</p>` +
+    files.filter(f => f.main).map(codeBlock).join('') +
+    `<details class="more"><summary>Остальные файлы: rackdc, JVM, ОС, эксплуатация</summary><div class="more-body">${files.filter(f => !f.main).map(codeBlock).join('')}</div></details>`;
+}
+
+/* ---------- Калибровка ---------- */
+function paneCal() {
+  const c = S.calib;
+  return `<p class="hint" style="max-width:78ch">Сжатие зависит от характера значений тегов и у каждого заказчика своё. Если есть действующая инсталляция с этой же схемой таблиц, внесите её фактические данные: калькулятор сравнит их с моделью и поправит расчёт.</p>
+  <div class="block"><label class="lbl" for="cal-text">Вывод <code>nodetool tablestats TSDB.data_points</code> с одной ноды</label>
+    <textarea id="cal-text" placeholder="Вставьте вывод команды целиком: значения Space used (live) и SSTable Compression Ratio заполнятся сами"></textarea></div>
+  <div class="grid" id="cal-form">
+    <div class="fld"><label for="c-space">Space used (live), ГиБ на ноду</label><input type="number" id="c-space" data-c="spaceGiB" min="0" step="any" value="${esc(c.spaceGiB)}"></div>
+    <div class="fld"><label for="c-ratio">SSTable Compression Ratio</label><input type="number" id="c-ratio" data-c="ratio" min="0" max="1.5" step="any" value="${esc(c.ratio)}"></div>
+    <div class="fld"><label for="c-nodes">Нод с данными в ДЦ</label><input type="number" id="c-nodes" data-c="nodes" min="1" step="1" value="${esc(c.nodes)}"></div>
+    <div class="fld"><label for="c-rf">RF keyspace TSDB</label><input type="number" id="c-rf" data-c="rf" min="1" step="1" value="${esc(c.rf)}"></div>
+    <div class="fld"><label for="c-days">Данные за сколько суток на диске</label><input type="number" id="c-days" data-c="days" min="0.1" step="any" value="${esc(c.days)}"></div>
+    <div class="fld"><label for="c-pps">Точек/с на инсталляции</label><input type="number" id="c-pps" data-c="pps" min="0" step="any" value="${esc(c.pps)}" placeholder="${nf(R.P)}"></div>
+  </div>
+  <p class="hint">Space used (live) не включает snapshots и каталог backups/. Число суток: возраст самых старых данных на диске; при удалении через DELETE это время работы инсталляции. Если поток не указан, берётся поток из расчёта, и тогда группы тегов должны совпадать с инсталляцией.</p>
+  <div id="cal-result">${calResult()}</div>`;
+}
+function calResult() {
+  const c = S.calib, k = R.calib;
+  if (!k.valid) return '<div class="inline-note">Заполните Space used (live), число нод, RF и число суток, чтобы сравнить факт с моделью.</div>';
+  const dev = k.dev * 100;
+  return `<div class="cal-res">
+      <div class="kpi"><span class="k">Факт, байт на точку</span><span class="v">${nf(k.measured, 1)}</span><span class="d">одна копия, LZ4, текущая схема</span></div>
+      <div class="kpi"><span class="k">Модель, байт на точку</span><span class="v">${nf(k.model, 1)}</span><span class="d">та же схема и поток</span></div>
+      <div class="kpi"><span class="k">Отклонение</span><span class="v ${Math.abs(dev) <= 20 ? 'ok' : Math.abs(dev) <= 50 ? 'mid' : 'bad'}">${dev > 0 ? '+' : ''}${nf(dev, 0)} %</span><span class="d">поправочный коэффициент ${nf(k.k, 3)}${k.ratio ? '; без сжатия ' + nf(k.kRaw, 3) : ''}</span></div>
+    </div>
+    <label class="check"><input type="checkbox" data-c="on" id="c-on" ${c.on ? 'checked' : ''}><span>Применить калибровку к расчёту<small>Коэффициент умножает объём данных во всех вариантах схемы.</small></span></label>`;
+}
+document.addEventListener('input', e => {
+  if (e.target.id !== 'cal-text') return;
+  const p = E.parseTablestats(e.target.value), got = [];
+  if (p.spaceGiB != null) { S.calib.spaceGiB = +p.spaceGiB.toFixed(3); $('c-space').value = S.calib.spaceGiB; got.push('Space used (live)'); }
+  if (p.ratio != null) { S.calib.ratio = p.ratio; $('c-ratio').value = p.ratio; got.push('Compression Ratio'); }
+  if (got.length) { schedule(0); toast('Распознано: ' + got.join(', ')); }
+});
+
+/* ---------- Методика ---------- */
+function paneMet() {
+  const v = R.variants[VAR];
+  const rows = E.TYPE_ORDER.filter(t => R.byType[t]).map(t => {
+    const gr = R.groups.find(g => g.type === t);
+    const pp = { type: t, period: gr.period, strBytes: t === 'STRING' ? R.strBytes : 0, annPct: 0, annBytes: 0, windowDays: v.v.W, ttlSec: R.ttlSec };
+    return `<tr><th scope="row">${t}</th><td>${esc(E.TYPE_COL[t])}</td><td class="r">${nf(R.byType[t].tags)}</td>${['cur', 'rec', 'unset'].map(k => { const ppk = Object.assign({}, pp, { windowDays: R.variants[k].v.W }); return `<td class="r">${nf(SZ.rowRaw(ppk, k), 1)} / ${nf(SZ.pointBytes(ppk, k, 'lz4').disk, 1)}</td>`; }).join('')}</tr>`;
+  }).join('');
+  return `<div class="block"><h3>Размер точки на диске</h3><div class="tbl-wrap"><table class="t"><thead><tr><th>Тип</th><th>Колонка</th><th class="r">Тегов</th><th class="r">Текущая схема</th><th class="r">Рекомендации</th><th class="r">+ драйвер</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="hint">Байт на точку без сжатия / с LZ4, без аннотаций, при периоде первой группы этого типа.</p></div>
+  <div class="prose">
+    <p><b>Как получены байты на точку.</b> Строка <code>data_points</code> сериализуется по правилам Cassandra 5.0.9 (UnfilteredSerializer, Cell.Serializer): флаги, clustering <code>event_time</code>, метка записи, TTL, ячейки. Каждый явный <code>null</code> записывается tombstone-ячейкой, пустая <code>annotation</code> ячейкой без значения. Поток Data.db режется на чанки 16 КиБ и сжимается LZ4 (4 байта длины + блок + CRC32), как CompressedSequentialWriter.</p>
+    <p><b>Проверка на Cassandra 5.0.9.</b> Модель сверена с официальным дистрибутивом 5.0.9 тремя способами. Эталонные SSTable из исходников (форматы oa и da) разобраны целиком, пересжатие совпало до байта. 23 набора строк записаны кодом 5.0.9 (CQLSSTableWriter): Data.db совпал с моделью побайтно по каждой партиции, включая tombstone от null, TTL, Unset.Value, BIG, BTI и таблицу без сжатия. 9 наборов записаны в запущенный сервер 5.0.9 через драйвер с последующим nodetool flush: байт на точку совпал с моделью в пределах 0,12 %.</p>
+    <p><b>Профиль значений.</b> Сжатие рассчитано на типовом профиле: 30 % неизменных значений у аналоговых тегов, 95 % у дискретных, 20 разных строк у STRING. Фактическое сжатие у заказчика уточняется во вкладке «Калибровка».</p>
+    <p><b>Unset.Value.</b> Если MES оставляет один INSERT со всеми колонками и передаёт Unset.Value, все 8 колонок остаются в заголовке SSTable, и в строке пишется маска отсутствующих колонок: 2 байта для числовых типов, 1 для STRING. Калькулятор считает этот вариант.</p>
+    <p><b>Формат SSTable.</b> С cassandra.yaml по умолчанию 5.0.9 работает в storage_compatibility_mode: CASSANDRA_4 и пишет формат nb (12 байт DeletionTime в заголовке партиции вместо 1). На объём данных это почти не влияет.</p>
+    <p><b>Объём.</b> Данные одной копии = байт на точку × точек в сутки × (срок хранения + окно TWCS + gc_grace_seconds) × рост тегов. На ноду: × RF / число нод (при стойках разного размера берётся самая загруженная нода). К данным на диске добавляются запас compaction, repair, snapshot, hints и 5 % свободного места файловой системы.</p>
+    <p><b>Ноды.</b> Число нод в ДЦ: максимум из RF (не меньше 3), объёма данных на ноду и CPU с запасом на отказ F нод; затем округление до кратного числу стоек. Каждый ДЦ рассчитан на полную нагрузку, чтобы принять MES при отказе другого.</p>
+    <p><b>Отказоустойчивость.</b> Требования consistency level как в ConsistencyLevel.blockFor, размещение реплик как в NetworkTopologyStrategy 5.0.9.</p>
+    <p><b>Оценки, требующие нагрузочного теста:</b> ${nf(E.M.wpc)} записей/с и ${nf(E.M.qpc)} запросов/с на ядро, задержки p99, время замены ноды.</p>
+    <p>Исходный код: <a href="https://github.com/apache/cassandra/tree/cassandra-5.0.9" target="_blank" rel="noopener">apache/cassandra, тег cassandra-5.0.9</a>.</p>
+  </div>`;
+}
+
+/* ---------- Сравнение ---------- */
+function summary() {
+  const v = R.variants[VAR];
+  return { mode: R.standalone ? 'Одна нода' : 'Кластер', tags: R.tags, P: R.P, ret: R.ret, rf: R.rep.dcs.map(d => d.rf).join('/'), dc: R.rep.dcs.length, variant: VN[VAR],
+    N: v.Ntotal, prof: v.chosen.p.c + ' ядер / ' + v.chosen.p.ram + ' ГБ', disk: v.node.reqData, drives: drivesStr(v.node), data: (v.L + v.snapT) * R.rep.dcs.reduce((a, d) => a + d.rf, 0), comp: S.comp === 'none' ? 'без сжатия' : 'LZ4' };
+}
+function renderCmp() {
+  $('tab-cmp').hidden = !CMP.length;
+  $('cmp-badge').innerHTML = CMP.length ? `<span class="badge n">${CMP.length}</span>` : '';
+  if (!CMP.length) { if (TAB === 'cmp') selectTab('sum'); $('pane-cmp').innerHTML = ''; return; }
+  const rows = [['Режим', x => x.mode], ['Вариант', x => x.variant], ['Тегов', x => nf(x.tags)], ['Точек/с', x => nf(x.P)], ['Хранение, сут', x => nf(x.ret)], ['RF × ДЦ', x => x.rf + ' × ' + x.dc], ['Сжатие', x => x.comp], ['Нод', x => nf(x.N)], ['Нода', x => x.prof], ['Data-диск на ноду', x => fB(x.disk)], ['Накопители', x => x.drives], ['Данные с репликами', x => fB(x.data)]];
+  $('pane-cmp').innerHTML = `<div class="tbl-wrap"><table class="t"><thead><tr><th></th>${CMP.map(c => `<th>${esc(c.name)}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map(r => `<tr><th scope="row">${r[0]}</th>${CMP.map(c => `<td>${esc(r[1](c.sum))}</td>`).join('')}</tr>`).join('')}
+    <tr><th></th>${CMP.map((c, i) => `<td><button class="btn ghost" type="button" data-cmp-load="${i}">Открыть</button> <button class="btn ghost" type="button" data-cmp-del="${i}">Удалить</button></td>`).join('')}</tr></tbody></table></div>
+    <div><button class="btn" type="button" data-cmp-clear>Очистить сравнение</button></div>`;
+}
+
+/* ---------- Экспорт ---------- */
+function saveFile(name, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+  toast('Файл ' + name + ' сохранён');
+}
+const stamp = () => new Date().toISOString().slice(0, 10);
+function closeMenu() { $('menu').open = false; }
+$('ex-zip').addEventListener('click', () => {
+  if (!R || R.empty) return;
+  const v = R.variants[VAR], files = E.configs(R, v).map(f => ({ name: f.file, data: f.text.replace(/\n/g, '\r\n') }));
+  files.push({ name: 'README.txt', data: `Конфигурация Apache Cassandra ${E.CASSANDRA_VERSION} для TSDB MES, вариант «${VN[VAR]}».\r\nНода: ${v.chosen.p.c} ядер, ${v.chosen.p.ram} ГБ RAM, ${drivesStr(v.node)}. Нод: ${v.Ntotal}.\r\nПараметры cassandra.yaml вносятся в conf/cassandra_latest.yaml дистрибутива.\r\nСформировано калькулятором TSDB Cassandra ${E.APP_VERSION}, ${stamp()}.\r\n` });
+  saveFile(`cassandra-config-${stamp()}.zip`, new Blob([XL.zip(files)], { type: 'application/zip' }));
+});
+$('ex-xlsx').addEventListener('click', () => {
+  if (!R || R.empty) return;
+  const ks = ['cur', 'rec', 'unset'], V = ks.map(k => R.variants[k]);
+  const GB = b => Math.round(b / 1e9 * 10) / 10;
+  const sum = [['Показатель', ...ks.map(k => VN[k])],
+    ['Режим', ...V.map(() => R.standalone ? 'Одна нода' : 'Кластер')], ['RF по ДЦ', ...V.map(() => R.rep.dcs.map(d => d.rf).join('/'))],
+    ['Запись CL', ...V.map(() => R.rep.wcl)], ['Чтение CL', ...V.map(() => R.rep.rcl)], ['Сжатие', ...V.map(() => S.comp === 'none' ? 'без сжатия' : 'LZ4')],
+    ['Нод всего', ...V.map(v => v.Ntotal)], ['Ядер на ноду', ...V.map(v => v.chosen.p.c)], ['RAM на ноду, ГБ', ...V.map(v => v.chosen.p.ram)], ['Heap, ГБ', ...V.map(v => v.node.ram.heap)],
+    ['Тегов', ...V.map(() => R.tags)], ['Точек/с', ...V.map(() => Math.round(R.P))],
+    ['Байт на точку, LZ4', ...V.map(v => +(v.lz4.day / (R.P * 86400)).toFixed(2))], ['Байт на точку без сжатия', ...V.map(v => +(v.none.day / (R.P * 86400)).toFixed(2))],
+    ['Данные одной копии, ГБ', ...V.map(v => GB(v.L))], ['backups/, ГБ', ...V.map(v => GB(v.B))],
+    ['Data-диск на ноду, ГБ', ...V.map(v => GB(v.node.reqData))], ['Накопители data', ...V.map(v => drivesStr(v.node))], ['Заполнение не выше, %', ...V.map(v => Math.round(v.node.fillLimit * 100))],
+    ['Commitlog, ГБ', ...V.map(v => Math.round(v.node.commitlog.drive * 1000))], ['ОС (2 диска RAID 1), ГБ', ...V.map(v => Math.round(v.node.os.drive * 1000))]];
+  const v = R.variants[VAR], n = v.node;
+  const disk = [['Компонент на ноду, ГБ', 'Значение'], ['Данные', GB(n.live)], ['Запас compaction', GB(n.head)], ['Repair', GB(n.repair)], ['Snapshot', GB(n.snapRes)], ['Snapshot после TRUNCATE', GB(n.autoSnap)], ['Hints', GB(n.hints)], ['incremental backups', GB(n.backups)], ['Итого', GB(n.reqData)]];
+  const grp = [['Тип', 'Тегов', 'Период, с', 'Точек/с']].concat(R.groups.map(g => [g.type, g.count, g.period, +g.pps.toFixed(3)]));
+  const ck = [['Уровень', 'Раздел', 'Проверка', 'Описание', 'Что сделать']].concat(R.checks.map(c => [{ crit: 'Критично', warn: 'Внимание', info: 'К сведению', ok: 'Норма' }[c.sev], c.scope, c.title, c.text, c.fix]));
+  const inp = [['Параметр', 'Значение'], ['Развёртывание', R.standalone ? 'Одна нода' : 'Кластер'], ['Глубина хранения, сут', R.ret], ['Рост тегов, %/год', +S.growth], ['Горизонт, лет', +S.years], ['Длина STRING', +S.strLen], ['Аннотации, % точек', +S.annPct], ['Длина аннотации', +S.annLen],
+    ['Дата-центров', R.rep.dcs.length], ['Допустимых отказов', R.F], ['Пользователей', +S.users], ['Профиль', E.USAGE[S.usage] ? E.USAGE[S.usage].label : 'Свой'], ['Накопители', E.DISK[S.disk].label], ['RAID', E.RAIDS[S.raid].label], ['Калибровка', R.calib.valid && R.calib.on ? 'k = ' + R.calib.k.toFixed(3) : 'нет']];
+  const data = XL.xlsx([{ name: 'Итог', rows: sum, widths: [34, 22, 22, 30] }, { name: 'Диск ноды (' + (VAR === 'cur' ? 'текущая' : 'рекоменд.') + ')', rows: disk, widths: [30, 14] }, { name: 'Группы тегов', rows: grp, widths: [12, 10, 10, 10] }, { name: 'Проверки', rows: ck, widths: [12, 18, 40, 70, 60] }, { name: 'Исходные данные', rows: inp, widths: [30, 24] }]);
+  saveFile(`cassandra-sizing-${stamp()}.xlsx`, new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+});
+function buildPrint() {
+  const v = R.variants[VAR];
+  CODE.length = 0;
+  $('print').innerHTML = `<div class="pane"><h2 style="font-size:20px">Расчёт кластера Cassandra для MES · ${esc(VN[VAR])}</h2><p class="hint">Калькулятор TSDB Cassandra ${E.APP_VERSION} · Apache Cassandra ${E.CASSANDRA_VERSION} · ${new Date().toLocaleDateString('ru-RU')}</p>${paneSum()}</div>
+    <div class="pane pb">${paneDisk()}</div>
+    <div class="pane pb"><h3>Проверки</h3>${checksHtml()}</div>
+    <div class="pane pb"><h3>Конфигурация</h3>${E.configs(R, v).filter(f => f.main).map(codeBlock).join('')}</div>`;
+}
+$('ex-pdf').addEventListener('click', () => { if (!R || R.empty) return; buildPrint(); window.print(); });
+window.addEventListener('beforeprint', () => { if (R && !R.empty && !$('print').innerHTML) buildPrint(); });
+window.addEventListener('afterprint', () => { $('print').innerHTML = ''; renderPanes(); });
+$('m-json').addEventListener('click', () => { closeMenu(); saveFile(`cassandra-scenario-${stamp()}.json`, new Blob([JSON.stringify({ app: 'mes-cassandra-calc', version: E.APP_VERSION, state: S }, null, 2)], { type: 'application/json' })); });
+$('im-json').addEventListener('change', e => {
+  closeMenu();
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => { try { const o = JSON.parse(rd.result); const st = o.state || o; if (!Array.isArray(st.groups)) throw new Error(); setState(st); toast('Сценарий загружен'); } catch (err) { toast('Файл не похож на сценарий калькулятора'); } e.target.value = ''; };
+  rd.readAsText(f);
+});
+$('m-link').addEventListener('click', async () => { closeMenu(); const url = location.href.split('#')[0] + '#s=' + toHash(S); try { await navigator.clipboard.writeText(url); toast('Ссылка скопирована'); } catch (e) { toast('Скопируйте адрес страницы из адресной строки'); } });
+$('m-save').addEventListener('click', () => {
+  closeMenu(); if (!R || R.empty) return;
+  if (CMP.length >= 5) { toast('В сравнении уже 5 расчётов, удалите лишний'); selectTab('cmp'); return; }
+  const sm = summary(); CMP.push({ name: `${sm.mode}, ${nf(sm.tags)} тегов, ${nf(sm.ret)} сут`, s: clone(S), sum: sm }); saveCmp(); renderCmp(); toast('Расчёт добавлен в сравнение');
+});
+$('m-reset').addEventListener('click', () => { closeMenu(); setState(DEF); toast('Значения сброшены'); });
+function openNew() { closeMenu(); const d = $('dlg-new'); if (d.showModal) d.showModal(); else d.setAttribute('open', ''); }
+$('m-new').addEventListener('click', openNew); $('f-new').addEventListener('click', openNew);
+$('dlg-new-close').addEventListener('click', () => $('dlg-new').close());
+document.addEventListener('click', e => { const m = $('menu'); if (m.open && !m.contains(e.target)) m.open = false; });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('menu').open) { $('menu').open = false; $('menu').querySelector('summary').focus(); } });
+
+function setState(st) { S = merge(DEF, clone(st)); fillDrive(); syncFields(); renderGroups(); applyVis(); schedule(0); }
+
+/* ---------- старт ---------- */
+$('cv').textContent = E.CASSANDRA_VERSION;
+fillSelects(); syncFields(); renderGroups(); applyVis(); selectTab('sum'); run();
+window.__calc = { get R() { return R; }, get S() { return S; } };
+})();
+
+</script>
+</body>
+</html>
