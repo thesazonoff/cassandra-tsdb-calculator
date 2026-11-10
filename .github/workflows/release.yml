@@ -1,13 +1,15 @@
 # Публикация релиза: Actions → Release → Run workflow → версия, например 2.0.1.
 # Проверяет версию в index.html, ставит аннотированный тег vX.Y.Z, считает SHA-256
 # и публикует релиз с заметками из docs/releases/vX.Y.Z.md.
+# Версия с суффиксом (2.1.0-rc.1) публикуется как предварительная и не становится последней.
+# Запускать из ветки, где лежит эта версия (поле «Use workflow from»).
 name: Release
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Версия без буквы v, например 2.0.1"
+        description: "Версия без буквы v, например 2.0.1 или 2.1.0-rc.1"
         required: true
 
 permissions:
@@ -30,11 +32,11 @@ jobs:
 
       - name: Проверить версию
         run: |
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
-            echo "::error::Версия должна быть в формате X.Y.Z"; exit 1
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?(-(alpha|beta|rc)\.[0-9]+)?$ ]]; then
+            echo "::error::Версия должна быть в формате X.Y.Z или X.Y.Z-rc.N"; exit 1
           fi
           grep -q "APP_VERSION = '$VERSION'" index.html || { echo "::error::В index.html другая версия"; exit 1; }
-          grep -q "## \[$VERSION\]" CHANGELOG.md || { echo "::error::Нет раздела $VERSION в CHANGELOG.md"; exit 1; }
+          grep -qF "## [$VERSION]" CHANGELOG.md || { echo "::error::Нет раздела $VERSION в CHANGELOG.md"; exit 1; }
           test -f "docs/releases/v$VERSION.md" || { echo "::error::Нет заметок docs/releases/v$VERSION.md"; exit 1; }
           if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
             echo "::error::Тег v$VERSION уже существует"; exit 1
@@ -55,10 +57,11 @@ jobs:
 
       - name: Опубликовать релиз
         run: |
+          if [[ "$VERSION" == *-* ]]; then KIND="--prerelease --latest=false"; else KIND="--latest"; fi
           gh release create "v$VERSION" \
             --verify-tag \
             --title "Калькулятор TSDB Cassandra $VERSION" \
             --notes-file "docs/releases/v$VERSION.md" \
-            --latest \
+            $KIND \
             "dist/cassandra-tsdb-calculator-$VERSION.html#Калькулятор $VERSION (HTML)" \
             "dist/SHA256SUMS.txt#Контрольная сумма SHA-256"

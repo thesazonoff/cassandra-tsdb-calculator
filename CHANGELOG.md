@@ -2,6 +2,12 @@
 
 Формат: [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии по [SemVer](https://semver.org/lang/ru/).
 
+## [2.1.0-rc.1] — 2026-11-10
+
+### Добавлено
+- Две страницы, переключаются вверху: «Системные требования» (калькулятор 2.0.1) и «Отказоустойчивость» (отдельный калькулятор отказоустойчивости Cassandra 5.0).
+- Ссылка на расчёт запоминает открытую страницу; ссылки версии 2.0.1 продолжают открываться.
+
 ## [2.0.1] — 2026-11-09
 
 ### Исправлено
@@ -29,6 +35,7 @@
 ### Добавлено
 - Первая версия: сайзинг кластера по группам тегов, RF и consistency level, диски по ролям, фрагменты конфигурации.
 
+[2.1.0-rc.1]: https://github.com/thesazonoff/cassandra-tsdb-calculator/releases/tag/v2.1.0-rc.1
 [2.0.1]: https://github.com/thesazonoff/cassandra-tsdb-calculator/releases/tag/v2.0.1
 [2.0]: https://github.com/thesazonoff/cassandra-tsdb-calculator/blob/main/CHANGELOG.md#20--2026-11-09
 [1.0]: https://github.com/thesazonoff/cassandra-tsdb-calculator/blob/main/CHANGELOG.md#10--2026-10-20
