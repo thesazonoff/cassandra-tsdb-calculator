@@ -23,17 +23,25 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',Robot
 .ver{font-size:12px;font-weight:600;color:#273000;background:var(--lime);border-radius:999px;padding:2px 9px}
 .frames{flex:1;position:relative;min-height:0}
 .frames iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--bg)}
-@media (max-width:560px){.lead span.t{display:none}.page-tab{padding:7px 12px;font-size:13px}}
+.right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.gh{display:inline-flex;align-items:center;gap:7px;color:#E6F0E2;text-decoration:none;font-size:13px;font-weight:600;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.22);min-height:34px}
+.gh:hover{background:rgba(255,255,255,.12);color:#fff}
+.gh:focus-visible{outline:3px solid var(--citron);outline-offset:2px}
+.gh svg{width:16px;height:16px;fill:currentColor}
+@media (max-width:560px){.lead span.t{display:none}.page-tab{padding:7px 12px;font-size:13px}.gh span{display:none}}
 @media print{.bar{display:none}}
 </style>
 </head>
 <body>
 <header class="bar">
   <div class="lead"><div class="mark" aria-hidden="true"><i></i><i></i><i></i></div><span class="t">Apache Cassandra 5.0.9 для MES</span><span class="ver" id="ver"></span></div>
-  <nav class="pages" role="tablist" aria-label="Страницы">
-    <button class="page-tab" role="tab" id="tab-calc" aria-controls="frame-calc" aria-selected="true">Системные требования</button>
-    <button class="page-tab" role="tab" id="tab-fault" aria-controls="frame-fault" aria-selected="false">Отказоустойчивость</button>
-  </nav>
+  <div class="right">
+    <nav class="pages" role="tablist" aria-label="Страницы">
+      <button class="page-tab" role="tab" id="tab-calc" aria-controls="frame-calc" aria-selected="true">Системные требования</button>
+      <button class="page-tab" role="tab" id="tab-fault" aria-controls="frame-fault" aria-selected="false">Отказоустойчивость</button>
+    </nav>
+    <a class="gh" href="https://github.com/thesazonoff/cassandra-tsdb-calculator" target="_blank" rel="noopener" aria-label="Репозиторий на GitHub" title="Репозиторий, релизы и история изменений на GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+  </div>
 </header>
 <main class="frames">
   <iframe id="frame-calc" role="tabpanel" aria-labelledby="tab-calc" title="Калькулятор системных требований"></iframe>
@@ -44,7 +52,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',Robot
 <script>
 (function () {
   'use strict';
-  const APP_VERSION = '2.1.0-rc.1';
+  const APP_VERSION = '2.1.0';
   const PAGES = ['calc', 'fault'];
   const $ = id => document.getElementById(id);
   $('ver').textContent = APP_VERSION;
